@@ -157,6 +157,29 @@ ortho_mat4 :: proc (left, right, bottom, top, near, far: f32) -> mat4 {
 
     return m
 }
+vec2_zero :: proc() -> vec2 { return {0.0, 0.0} }
+
+dot_vec2 :: proc(a, b: vec2) -> f32 {
+    return a.x * b.x + a.y * b.y
+}
+
+len_sq_vec2 :: proc(v: vec2) -> f32 { // Length squared (cheaper than len)
+    return dot_vec2(v, v)
+}
+
+len_vec2 :: proc(v: vec2) -> f32 {
+    return math.sqrt(len_sq_vec2(v))
+}
+
+norm_vec2 :: proc(v: vec2) -> vec2 { // Normalize
+    l := len_vec2(v)
+    if l > 0.00001 { // Avoid division by zero
+        inv_l := 1.0 / l
+        return v * inv_l
+    } else {
+        return {0.0, 0.0}
+    }
+}
 
 // Add this procedure for Scaling
 scale :: proc {

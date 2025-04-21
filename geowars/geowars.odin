@@ -15,11 +15,26 @@ state: struct {
     bind: sg.Bindings,
     bg_pip: sg.Pipeline,
     player_pip: sg.Pipeline,
-    // Structs below should match names generated in shader.odin by sokol-shdc
     bg_fs_params: Bg_Fs_Params,
     player_vs_params: Player_Vs_Params,
     player_fs_params: Player_Fs_Params,
+
+    // --- Player Movement State ---
+    player_pos: m.vec2,       // Current position
+    player_vel: m.vec2,       // Current velocity
+
+    // --- Input State ---
+    key_w_down: bool,
+    key_s_down: bool,
+    key_a_down: bool,
+    key_d_down: bool,
 }
+
+// --- Movement Constants ---
+PLAYER_ACCELERATION      :: 15.0  // Units per second per second
+PLAYER_REVERSE_FACTOR    :: 0.5   // Reverse is this % of forward acceleration
+PLAYER_DAMPING           :: 2.5   // Higher = stops faster (proportional to velocity)
+PLAYER_MAX_SPEED         :: 7.0   // Units per second
 
 // Stride for the vertex buffer (pos: 3 floats, color/uv: 4 floats)
 // If your vertex layout changes, update this.
@@ -96,56 +111,108 @@ init :: proc "c" () {
     })
 }
 
+// Add this function somewhere in geowars.odin
+event :: proc "c" (event: ^sapp.Event) {
+    context = runtime.default_context() // Set context if needed
+
+    #partial switch event.type {
+    case .KEY_DOWN:
+        #partial switch event.key_code {
+        case .W:     state.key_w_down = true
+        case .S:     state.key_s_down = true
+        case .A:     state.key_a_down = true
+        case .D:     state.key_d_down = true
+        case .ESCAPE: sapp.request_quit()
+        }
+    case .KEY_UP:
+         #partial switch event.key_code {
+        case .W:     state.key_w_down = false
+        case .S:     state.key_s_down = false
+        case .A:     state.key_a_down = false
+        case .D:     state.key_d_down = false
+        }
+    // Add other event types if needed (e.g., MOUSE_MOVE)
+    }
+}
 
 frame :: proc "c" () {
     context = runtime.default_context()
     width := sapp.widthf(); height := sapp.heightf(); aspect := width / height
-    current_time := f32(sapp.frame_count()) / 60.0
+    current_time := f32(sapp.frame_count()) / 60.0 // Use consistent time
+    delta_time := f32(sapp.frame_duration())
 
-    // --- Update Uniforms ---
-    state.bg_fs_params.tick = current_time
-    state.bg_fs_params.resolution = {width, height}
+    // --- Player Physics Update ---
 
-    state.player_fs_params.tick = current_time
-    state.player_fs_params.resolution = {width, height}
+  // 1. Accel Input
+  accel_input := m.vec2_zero()
+  if state.key_w_down { accel_input.y += 1.0 }
+  if state.key_s_down { accel_input.y -= 1.0 }
+  if state.key_a_down { accel_input.x -= 1.0 }
+  if state.key_d_down { accel_input.x += 1.0 }
+  accel_input_len_sq := m.len_sq_vec2(accel_input)
+  if accel_input_len_sq > 0.001 { accel_input = m.norm_vec2(accel_input) }
+  // 2. Apply Acceleration & Reverse Factor
+  final_accel := accel_input * PLAYER_ACCELERATION
+  if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 {
+      final_accel = final_accel * PLAYER_REVERSE_FACTOR
+  }
+  // 3. Update Velocity
+  state.player_vel += final_accel * delta_time
+  // 4. Apply Damping
+  damping_factor := max(0.0, 1.0 - PLAYER_DAMPING * delta_time)
+  state.player_vel *= damping_factor
+  // 5. Clamp to Max Speed
+  vel_len_sq := m.len_sq_vec2(state.player_vel)
+  max_speed_sq := PLAYER_MAX_SPEED * PLAYER_MAX_SPEED
+  if vel_len_sq > f32(max_speed_sq) {
+      state.player_vel = m.norm_vec2(state.player_vel) * PLAYER_MAX_SPEED
+  }
+  // 6. Update Position
+  state.player_pos += state.player_vel * delta_time
 
-    // Player MVP Matrix
-    ortho_height :: 1.5; ortho_width := ortho_height * aspect
-    // FIXED: Ensure m.ortho exists in your math library
-    proj := m.ortho(-ortho_width, ortho_width, -ortho_height, ortho_height, -1.0, 1.0)
-    view := m.identity() // Assuming m.identity() exists
-    player_scale :: 0.25
-    // FIXED: Ensure m.scale exists and add vec3 type to literal
-    // FIXED: Add type m.vec3 to scale vector literal
-    scale_vec := m.vec3{player_scale, player_scale, 1.0}
-    model := m.scale(scale_vec) // Assuming m.scale exists
 
-    // Combine: MVP = Projection * View * Model (Assuming m.mul exists)
-    state.player_vs_params.mvp = m.mul(proj, m.mul(view, model))
+  // --- Update Uniforms ---
+  state.bg_fs_params.tick = current_time
+  state.bg_fs_params.resolution = {width, height}
+  state.player_fs_params.tick = current_time // Pass time to FS
+  state.player_fs_params.resolution = {width, height}
 
-    // --- Rendering ---
-    sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
+  // --- Player MVP Matrix (No 3D Rotation Here) ---
+  ortho_height :: 1.5; ortho_width := ortho_height * aspect
+  proj := m.ortho(-ortho_width, ortho_width, -ortho_height, ortho_height, -1.0, 1.0)
+  view := m.identity()
 
-    // 1. Draw Background
-    sg.apply_pipeline(state.bg_pip)
-    sg.apply_bindings(state.bind)
-    // FIXED: Use explicit Range, ensure UB_bg_fs_params is generated (likely 0)
-    sg.apply_uniforms(UB_bg_fs_params, sg.Range{ ptr = &state.bg_fs_params, size = size_of(state.bg_fs_params) })
-    sg.draw(0, 4, 1)
+  // Transformation components
+  player_scale :: 0.25
+  scale_mat := m.scale(m.vec3{player_scale, player_scale, 1.0})
+  translate_mat := m.translate(m.vec3{state.player_pos.x, state.player_pos.y, 0.0})
 
-    // 2. Draw Player
-    sg.apply_pipeline(state.player_pip)
-    sg.apply_bindings(state.bind)
-    // FIXED: Use explicit Range and correct generated UB names (check shader.odin!)
-    // !! Use the EXACT names generated by sokol-shdc !!
-    sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ ptr = &state.player_vs_params, size = size_of(state.player_vs_params) })
-    sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ ptr = &state.player_fs_params, size = size_of(state.player_fs_params) })
-    sg.draw(0, 4, 1)
+  // Combine transformations: Model = Translate * Scale (No rotation matrix)
+  model := m.mul(translate_mat, scale_mat) // REVERTED: Removed rotate_mat
 
-    sg.end_pass()
-    sg.commit()
+  // Final MVP
+  state.player_vs_params.mvp = m.mul(proj, m.mul(view, model)) // REVERTED
+
+  // --- Rendering ---
+  sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
+
+  // 1. Draw Background (Same as before)
+  sg.apply_pipeline(state.bg_pip)
+  sg.apply_bindings(state.bind)
+  sg.apply_uniforms(UB_bg_fs_params, sg.Range{ ptr = &state.bg_fs_params, size = size_of(state.bg_fs_params) })
+  sg.draw(0, 4, 1)
+
+
+  // 2. Draw Player (Using non-rotating MVP)
+  sg.apply_pipeline(state.player_pip)
+  sg.apply_bindings(state.bind)
+  sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ ptr = &state.player_vs_params, size = size_of(state.player_vs_params) })
+  sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ ptr = &state.player_fs_params, size = size_of(state.player_fs_params) })
+  sg.draw(0, 4, 1)
+
+  sg.end_pass()
+  sg.commit()
 }
-
 
 cleanup :: proc "c" () {
     context = runtime.default_context()
@@ -156,6 +223,7 @@ cleanup :: proc "c" () {
 main :: proc () {
     sapp.run({
         init_cb = init, frame_cb = frame, cleanup_cb = cleanup,
+        event_cb = event, // ADDED: Register the event callback
         width = 800, height = 600, sample_count = 4,
         window_title = "GeoWars Odin", icon = { sokol_default = true },
         logger = { func = slog.func },
