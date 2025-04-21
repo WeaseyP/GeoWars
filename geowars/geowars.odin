@@ -8,7 +8,7 @@ import slog "../sokol/log"
 import sg "../sokol/gfx"
 import sapp "../sokol/app"
 import sglue "../sokol/glue"
-import m "../math" // Assuming this contains mat4, vec3, identity, ortho, scale, mul
+import m "../math" // Used for vec2, len_sq_vec2, norm_vec2, ortho, scale, translate, mul
 
 state: struct {
     pass_action: sg.Pass_Action,
@@ -64,7 +64,6 @@ init :: proc "c" () {
     }
     state.bind.vertex_buffers[0] = sg.make_buffer({
         label = "quad-vertices",
-        // FIXED: Use explicit Range creation
         data = sg.Range{ ptr = &vertices[0], size = size_of(vertices) },
     })
 
@@ -171,11 +170,16 @@ frame :: proc "c" () {
   state.player_pos += state.player_vel * delta_time
 
 
-  // --- Update Uniforms ---
-  state.bg_fs_params.tick = current_time
-  state.bg_fs_params.resolution = {width, height}
-  state.player_fs_params.tick = current_time // Pass time to FS
-  state.player_fs_params.resolution = {width, height}
+     // --- Update Uniforms ---
+     state.bg_fs_params.tick = current_time
+     state.bg_fs_params.resolution = {width, height}
+     // SET BACKGROUND OPTION:
+     // 0 = Original Tiling Background
+     // 1 = New Space Background
+     state.bg_fs_params.bg_option = 1 // <<< SET TO 1 TO SHOW SPACE BACKGROUND
+ 
+     state.player_fs_params.tick = current_time
+     state.player_fs_params.resolution = {width, height}
 
   // --- Player MVP Matrix (No 3D Rotation Here) ---
   ortho_height :: 1.5; ortho_width := ortho_height * aspect
@@ -193,25 +197,24 @@ frame :: proc "c" () {
   // Final MVP
   state.player_vs_params.mvp = m.mul(proj, m.mul(view, model)) // REVERTED
 
-  // --- Rendering ---
-  sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
+   sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
 
-  // 1. Draw Background (Same as before)
-  sg.apply_pipeline(state.bg_pip)
-  sg.apply_bindings(state.bind)
-  sg.apply_uniforms(UB_bg_fs_params, sg.Range{ ptr = &state.bg_fs_params, size = size_of(state.bg_fs_params) })
-  sg.draw(0, 4, 1)
+    // 1. Draw Background
+    sg.apply_pipeline(state.bg_pip)
+    sg.apply_bindings(state.bind)
+    // Apply the updated bg_fs_params (now includes bg_option)
+    sg.apply_uniforms(UB_bg_fs_params, sg.Range{ ptr = &state.bg_fs_params, size = size_of(state.bg_fs_params) })
+    sg.draw(0, 4, 1)
 
+    // 2. Draw Player (Same as before)
+    sg.apply_pipeline(state.player_pip)
+    sg.apply_bindings(state.bind)
+    sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ ptr = &state.player_vs_params, size = size_of(state.player_vs_params) })
+    sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ ptr = &state.player_fs_params, size = size_of(state.player_fs_params) })
+    sg.draw(0, 4, 1)
 
-  // 2. Draw Player (Using non-rotating MVP)
-  sg.apply_pipeline(state.player_pip)
-  sg.apply_bindings(state.bind)
-  sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ ptr = &state.player_vs_params, size = size_of(state.player_vs_params) })
-  sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ ptr = &state.player_fs_params, size = size_of(state.player_fs_params) })
-  sg.draw(0, 4, 1)
-
-  sg.end_pass()
-  sg.commit()
+    sg.end_pass()
+    sg.commit()
 }
 
 cleanup :: proc "c" () {
