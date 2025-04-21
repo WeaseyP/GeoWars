@@ -133,6 +133,46 @@ rotate_mat4 :: proc (angle: f32, axis_unorm: vec3) -> mat4 {
 
     return m
 }
+// Add this procedure for Orthographic Projection
+ortho :: proc {
+    ortho_mat4,
+}
+ortho_mat4 :: proc (left, right, bottom, top, near, far: f32) -> mat4 {
+    m := identity() // Start with identity
+
+    // Calculate differences
+    rl := right - left
+    tb := top - bottom
+    fn := far - near
+
+    // Set the specific elements for orthographic projection
+    // Assuming column-major layout as suggested by mul_mat4
+    m[0][0] = 2.0 / rl
+    m[1][1] = 2.0 / tb
+    m[2][2] = -2.0 / fn // Use -2.0 for right-handed coords (like OpenGL/Sokol default)
+    m[3][0] = -(right + left) / rl
+    m[3][1] = -(top + bottom) / tb
+    m[3][2] = -(far + near) / fn
+    // m[3][3] remains 1.0 from identity
+
+    return m
+}
+
+// Add this procedure for Scaling
+scale :: proc {
+    scale_mat4,
+}
+scale_mat4 :: proc (v: vec3) -> mat4 {
+    m := identity() // Start with identity
+
+    // Set diagonal elements for scaling
+    m[0][0] = v.x
+    m[1][1] = v.y
+    m[2][2] = v.z
+    // m[3][3] remains 1.0 from identity
+
+    return m
+}
 
 translate :: proc{
     translate_mat4,
