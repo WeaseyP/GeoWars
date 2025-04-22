@@ -234,90 +234,127 @@ spawn_swirling_charge :: proc() {
 		})
 	}
 }
-
 // Modified update function
 update_and_instance_particles :: proc(dt: f32) -> int {
-	context = runtime.default_context()
-	live_particle_count := 0
-	for i in 0..<MAX_PARTICLES {
-		if !state.particles[i].active { continue }
+    context = runtime.default_context()
 
-		p := &state.particles[i]
+    // --- Get Screen Boundaries (World Coordinates) ---
+    // NOTE: Recalculating here. Alternatively, pass them from frame() or store in state.
+    width := sapp.widthf()
+    height := sapp.heightf()
+    aspect := width / height
+    ortho_width := ORTHO_HEIGHT * aspect
 
-        // --- Update Movement FIRST ---
+    // Base boundaries (center point)
+    min_x_bound : f32 = -ortho_width
+    max_x_bound : f32 =  ortho_width
+    min_y_bound : f32 = -ORTHO_HEIGHT
+    max_y_bound : f32 =  ORTHO_HEIGHT
+    // ---
+
+    live_particle_count := 0
+    for i in 0..<MAX_PARTICLES {
+        if !state.particles[i].active { continue }
+
+        p := &state.particles[i]
+
+        // --- Store original position before update (optional, for debugging) ---
+        // old_pos := p.pos
+
+        // --- Update Position based on current velocity ---
         p.pos += p.vel * dt
-		p.rotation += p.angular_vel * dt
-        // --- End Update Movement ---
+        p.rotation += p.angular_vel * dt // Keep rotation update separate
+
+        // --- Boundary Collision Check and Response ---
+        half_size := p.size * 0.5 // Particle "radius" assuming quad from -0.5 to 0.5
+
+        // Check Left Boundary
+        if p.pos.x - half_size < min_x_bound {
+            p.pos.x = min_x_bound + half_size // Reposition inside
+            p.vel.x *= -1.0                  // Reflect horizontal velocity
+            // Optional: Dampen velocity on bounce
+            // p.vel *= 0.9
+        } // Check Right Boundary
+        else if p.pos.x + half_size > max_x_bound {
+            p.pos.x = max_x_bound - half_size // Reposition inside
+            p.vel.x *= -1.0                  // Reflect horizontal velocity
+            // Optional: Dampen velocity on bounce
+            // p.vel *= 0.9
+        } // Check Bottom Boundary
+        if p.pos.y - half_size < min_y_bound {
+            p.pos.y = min_y_bound + half_size // Reposition inside
+            p.vel.y *= -1.0                  // Reflect vertical velocity
+            // Optional: Dampen velocity on bounce
+            // p.vel *= 0.9
+        } // Check Top Boundary
+        else if p.pos.y + half_size > max_y_bound {
+            p.pos.y = max_y_bound - half_size // Reposition inside
+            p.vel.y *= -1.0                  // Reflect vertical velocity
+            // Optional: Dampen velocity on bounce
+            // p.vel *= 0.9
+        }
+        // --- End Boundary Check ---
+
 
         // --- Update Lifetime & Check for State Transition/Death ---
+        // (This logic remains AFTER position/bounce updates)
         p.life_remaining -= dt
 
         // Check if Swirl Phase Ends and Transition to Explosion
         if p.is_swirling_charge && p.life_remaining <= 0.0 {
             p.is_swirling_charge = false // Transition state to explosion
 
-            // Calculate duration and reset life for the explosion phase
             new_life := EXPLOSION_LIFETIME_BASE + rand.float32() * EXPLOSION_LIFETIME_RAND
-            p.life_remaining = new_life // Set remaining life TO explosion duration
-            p.life_max = new_life     // Set max life FOR explosion phase
+            p.life_remaining = new_life
+            p.life_max = new_life
 
-            // --- CORRECTED Explosion Center Calculation ---
-            // Use the *original* swirl duration stored earlier
             explosion_center := p.charge_center_pos + p.cloud_travel_vel * p.swirl_duration
-            // ---
 
-            // Explode outwards radially from the calculated center
             relative_pos := p.pos - explosion_center
-            outward_dir : m.vec2 = {rand.float32() * 2.0 - 1.0, rand.float32() * 2.0 - 1.0} // Random direction if directly on center
+            outward_dir : m.vec2 = {rand.float32() * 2.0 - 1.0, rand.float32() * 2.0 - 1.0}
             len_sq := m.len_sq_vec2(relative_pos)
-            if len_sq > 0.0001 { // Check against a small epsilon
-                 outward_dir = relative_pos / math.sqrt(len_sq) // Normalize manually or use m.norm_vec2
-            } else if m.len_sq_vec2(outward_dir) > 0.0001 { // Normalize the random fallback direction
+            if len_sq > 0.0001 {
+                 outward_dir = relative_pos / math.sqrt(len_sq)
+            } else if m.len_sq_vec2(outward_dir) > 0.0001 {
                  outward_dir = m.norm_vec2(outward_dir)
             } else {
-                 outward_dir = {0.0, 1.0} // Absolute fallback
+                 outward_dir = {0.0, 1.0}
             }
 
-
-            // Calculate explosion speed
             explosion_speed := EXPLOSION_SPEED_BASE + rand.float32() * EXPLOSION_SPEED_RAND
-
-            // --- CRITICAL: OVERWRITE velocity completely with radial explosion ---
-            p.vel = outward_dir * explosion_speed
-            // ---
-
-            p.angular_vel = EXPLOSION_PARTICLE_SPIN // Set angular velocity for explosion phase (currently 0)
+            p.vel = outward_dir * explosion_speed // Overwrite velocity for explosion
+            p.angular_vel = EXPLOSION_PARTICLE_SPIN
         }
 
         // Check if Exploding Particle Dies
-        // Only check dying for particles that are *not* swirling anymore
         if !p.is_swirling_charge && p.life_remaining <= 0.0 {
             p.active = false
-            continue // Skip instancing for dead particles
+            continue // Skip visual update and instancing
         }
         // --- End Lifetime/State Check ---
 
         // --- Update Visuals (Size/Alpha) ---
         life_ratio: f32 = 0.0
-        if p.life_max > 0.0 { // Use the life_max relevant to the *current* phase
+        if p.life_max > 0.0 {
             life_ratio = math.max(f32(0.0), p.life_remaining / p.life_max)
         }
 
 		if p.is_swirling_charge {
-            // Visuals during swirl phase
-            p.size = p.start_size // Constant size during swirl (or other effect if desired)
-            p.color.a = 1.0      // Constant alpha during swirl
+            p.size = p.start_size
+            p.color.a = 1.0
         } else {
-            // Visuals during explosion phase (fade out)
-			p.size = p.start_size * life_ratio * life_ratio; // Quadratic fade out size
-			p.color.a = life_ratio * life_ratio;             // Quadratic fade out alpha
+			p.size = p.start_size * life_ratio * life_ratio;
+			p.color.a = life_ratio * life_ratio;
 		}
         // --- End Visual Update ---
 
         // --- Copy data to instance buffer ---
 		if live_particle_count < MAX_PARTICLES {
 			inst := &state.particle_instance_data[live_particle_count];
-			inst.instance_pos=p.pos; inst.instance_size=p.size; inst.instance_rotation=p.rotation; inst.instance_color=p.color;
+			inst.instance_pos = p.pos; // Use the potentially adjusted position
+            inst.instance_size = p.size;
+            inst.instance_rotation = p.rotation;
+            inst.instance_color = p.color;
 			live_particle_count += 1;
 		}
 	}
@@ -330,28 +367,147 @@ update_and_instance_particles :: proc(dt: f32) -> int {
 
 
 frame :: proc "c" () {
-    // (Frame logic remains the same)
     context = runtime.default_context()
-    width := sapp.widthf(); height := sapp.heightf(); aspect := width / height
-    current_time := f32(sapp.frame_count()) / 60.0
-    delta_time := f32(sapp.frame_duration()); delta_time = math.min(delta_time, 1.0/15.0);
+
+    // --- Timing and Basic Setup ---
+    width := sapp.widthf()
+    height := sapp.heightf()
+    aspect := width / height
+    current_time := f32(sapp.frame_count()) / 60.0 // Simple time based on frames
+    delta_time := f32(sapp.frame_duration())
+    delta_time = math.min(delta_time, 1.0/15.0) // Clamp delta time to avoid large jumps (frame limiter)
+
+    // --- Update Cooldowns ---
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time)
-    accel_input := m.vec2_zero(); if state.key_w_down {accel_input.y+=1.0}; if state.key_s_down {accel_input.y-=1.0}; if state.key_a_down {accel_input.x-=1.0}; if state.key_d_down {accel_input.x+=1.0};
-    if m.len_sq_vec2(accel_input) > 0.001 {accel_input=m.norm_vec2(accel_input)}; final_accel := accel_input*PLAYER_ACCELERATION; if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 { final_accel *= PLAYER_REVERSE_FACTOR };
-    state.player_vel += final_accel*delta_time; damping_factor := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time); state.player_vel *= damping_factor; if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) {state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED}; state.player_pos += state.player_vel*delta_time;
-	can_fire_rmb := state.rmb_cooldown_timer <= 0.0; rmb_pressed_this_frame := state.rmb_down && !state.previous_rmb_down; if rmb_pressed_this_frame && can_fire_rmb { spawn_swirling_charge(); if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION } }; state.previous_rmb_down=state.rmb_down;
-    state.bg_fs_params={tick=current_time, resolution={width,height}, bg_option=1}; state.player_fs_params={tick=current_time, resolution={width,height}}; state.particle_fs_params={tick=current_time};
-    ortho_width := ORTHO_HEIGHT*aspect; proj := m.ortho(-ortho_width,ortho_width,-ORTHO_HEIGHT,ORTHO_HEIGHT,-1.0,1.0); view := m.identity(); view_proj := m.mul(proj,view); scale_mat := m.scale(m.vec3{PLAYER_SCALE,PLAYER_SCALE,1.0}); translate_mat := m.translate(m.vec3{state.player_pos.x,state.player_pos.y,0.0}); model := m.mul(translate_mat,scale_mat); state.player_vs_params.mvp=m.mul(view_proj,model); state.particle_vs_params.view_proj=view_proj;
-    state.num_active_particles = update_and_instance_particles(delta_time);
-    sg.begin_pass({action=state.pass_action, swapchain=sglue.swapchain() });
-    sg.apply_pipeline(state.bg_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr=&state.bg_fs_params, size=size_of(Bg_Fs_Params)}); sg.draw(0,4,1);
-    sg.apply_pipeline(state.player_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr=&state.player_vs_params, size=size_of(Player_Vs_Params)}); sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr=&state.player_fs_params, size=size_of(Player_Fs_Params)}); sg.draw(0,4,1);
-	if state.num_active_particles > 0 {
-		sg.apply_pipeline(state.particle_pip); sg.apply_bindings(state.particle_bind); sg.update_buffer(state.particle_instance_vbo, sg.Range{ptr=rawptr(&state.particle_instance_data[0]), size=uint(state.num_active_particles)*size_of(Particle_Instance_Data)});
-		sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(Particle_Fs_Params)});
-		sg.draw(0, 4, state.num_active_particles);
-	}
-    sg.end_pass(); sg.commit();
+
+    // --- Player Input Handling ---
+    accel_input := m.vec2_zero()
+    if state.key_w_down { accel_input.y += 1.0 }
+    if state.key_s_down { accel_input.y -= 1.0 }
+    if state.key_a_down { accel_input.x -= 1.0 }
+    if state.key_d_down { accel_input.x += 1.0 }
+
+    // Normalize input vector if diagonal movement
+    if m.len_sq_vec2(accel_input) > 0.001 {
+        accel_input = m.norm_vec2(accel_input)
+    }
+
+    // --- Player Physics Update ---
+    // Calculate acceleration force
+    final_accel := accel_input * PLAYER_ACCELERATION
+    // Apply reverse thrust modifier if only 'S' is pressed
+    if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 {
+        final_accel *= PLAYER_REVERSE_FACTOR
+    }
+
+    // Apply acceleration to velocity
+    state.player_vel += final_accel * delta_time
+
+    // Apply damping (friction)
+    damping_factor := math.max(0.0, 1.0 - PLAYER_DAMPING * delta_time)
+    state.player_vel *= damping_factor
+
+    // Clamp velocity to max speed
+    if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED * PLAYER_MAX_SPEED) {
+        state.player_vel = m.norm_vec2(state.player_vel) * PLAYER_MAX_SPEED
+    }
+
+    // Update position based on velocity
+    state.player_pos += state.player_vel * delta_time
+
+    // --- Player Boundary Clamping ---
+    ortho_width : f32 = ORTHO_HEIGHT * aspect // Calculate world space horizontal extent
+    player_half_extent : f32 = PLAYER_SCALE * 0.7   // Half the visual size based on scale
+
+    min_x : f32 = -ortho_width + player_half_extent
+    max_x : f32 =  ortho_width - player_half_extent
+    min_y : f32 = -ORTHO_HEIGHT + player_half_extent
+    max_y : f32 =  ORTHO_HEIGHT - player_half_extent
+
+    state.player_pos.x = math.clamp(state.player_pos.x, min_x, max_x)
+    state.player_pos.y = math.clamp(state.player_pos.y, min_y, max_y)
+
+    // --- Right Mouse Button Ability ---
+    can_fire_rmb := state.rmb_cooldown_timer <= 0.0
+    rmb_pressed_this_frame := state.rmb_down && !state.previous_rmb_down
+
+    if rmb_pressed_this_frame && can_fire_rmb {
+        spawn_swirling_charge() // Call the function to spawn particles
+        // Start cooldown if applicable
+        if BLACKHOLE_COOLDOWN_DURATION > 0.0 {
+            state.rmb_cooldown_timer = BLACKHOLE_COOLDOWN_DURATION
+        }
+    }
+    state.previous_rmb_down = state.rmb_down // Track state for next frame
+
+    // --- Update Shader Uniforms ---
+    state.bg_fs_params = { tick = current_time, resolution = {width, height}, bg_option = 1 }
+    state.player_fs_params = { tick = current_time, resolution = {width, height} }
+    state.particle_fs_params = { tick = current_time }
+
+    // --- Calculate Matrices ---
+    // Projection matrix (Orthographic)
+    proj := m.ortho(-ortho_width, ortho_width, -ORTHO_HEIGHT, ORTHO_HEIGHT, -1.0, 1.0)
+    // View matrix (Identity for 2D top-down)
+    view := m.identity()
+    // Combined View-Projection matrix
+    view_proj := m.mul(proj, view)
+
+    // Player Model matrix (Scale * Translation)
+    // NOTE: Uses the *clamped* state.player_pos
+    scale_mat := m.scale(m.vec3{PLAYER_SCALE, PLAYER_SCALE, 1.0})
+    translate_mat := m.translate(m.vec3{state.player_pos.x, state.player_pos.y, 0.0})
+    model := m.mul(translate_mat, scale_mat)
+
+    // Final Model-View-Projection matrix for the player
+    state.player_vs_params.mvp = m.mul(view_proj, model)
+    // View-Projection matrix for particles (applied in vertex shader)
+    state.particle_vs_params.view_proj = view_proj
+
+    // --- Update Particles ---
+    state.num_active_particles = update_and_instance_particles(delta_time)
+
+    // --- Rendering ---
+    sg.begin_pass({ action = state.pass_action, swapchain = sglue.swapchain() })
+
+    // Draw Background
+    sg.apply_pipeline(state.bg_pip)
+    sg.apply_bindings(state.bind) // Uses the shared quad VBO
+    sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr = &state.bg_fs_params, size = size_of(Bg_Fs_Params)})
+    sg.draw(0, 4, 1) // Draw 1 instance of the quad
+
+    // Draw Player
+    sg.apply_pipeline(state.player_pip)
+    sg.apply_bindings(state.bind) // Uses the shared quad VBO
+    sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr = &state.player_vs_params, size = size_of(Player_Vs_Params)})
+    sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr = &state.player_fs_params, size = size_of(Player_Fs_Params)})
+    sg.draw(0, 4, 1) // Draw 1 instance of the quad
+
+    // Draw Particles (if any are active)
+    if state.num_active_particles > 0 {
+        sg.apply_pipeline(state.particle_pip)
+        sg.apply_bindings(state.particle_bind) // Binds particle quad VBO and instance data VBO
+
+        // Update the instance data buffer with current particle states
+        sg.update_buffer(
+            state.particle_instance_vbo,
+            sg.Range{
+                ptr = rawptr(&state.particle_instance_data[0]),
+                size = uint(state.num_active_particles) * size_of(Particle_Instance_Data),
+            },
+        )
+
+        // Apply particle uniforms
+        sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr = &state.particle_vs_params, size = size_of(Particle_Vs_Params)})
+        sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr = &state.particle_fs_params, size = size_of(Particle_Fs_Params)})
+
+        // Draw particles (instanced rendering)
+        sg.draw(0, 4, state.num_active_particles) // Draw quad base, instanced N times
+    }
+
+    // End Rendering Pass and Commit
+    sg.end_pass()
+    sg.commit()
 }
 
 cleanup :: proc "c" () { context=runtime.default_context(); sg.shutdown(); }
