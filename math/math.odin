@@ -14,6 +14,7 @@ PI  :: 3.14159265358979323846264338327950288
 
 vec2 :: distinct [2]f32
 vec3 :: distinct [3]f32
+vec4 :: distinct [4]f32
 mat4 :: distinct [4][4]f32
 
 radians :: proc (degrees: f32) -> f32 { return degrees * TAU / 360.0 }
@@ -52,6 +53,13 @@ cross_vec3 :: proc(v0, v1: vec3) -> vec3 {
         (v0.z * v1.x) - (v0.x * v1.z),
         (v0.x * v1.y) - (v0.y * v1.x),
     }
+}
+angle_to_vec2 :: proc "contextless" (angle_radians: f32) -> vec2 {
+    // Use core:math's functions unless your 'm' package redefines them for f32
+    c := math.cos(angle_radians) 
+    s := math.sin(angle_radians)
+    // Assuming vec2 is defined as [2]f32 or similar struct in your 'm' package
+    return vec2{c, s}; 
 }
 
 identity :: proc {
@@ -108,6 +116,11 @@ lookat_mat4 :: proc(eye, center, up: vec3) -> mat4 {
     m[3][3] = 1.0
 
     return m
+}
+hash11 :: proc(p: f32) -> f32 {
+    // GLSL: fract(sin(p * 78.233) * 43758.5453);
+    h := math.sin(p * 78.233) * 43758.5453;
+    return h - math.floor(h); // Odin equivalent of fract()
 }
 
 rotate :: proc{
