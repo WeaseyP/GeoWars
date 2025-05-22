@@ -13,7 +13,7 @@ layout(location=3) in vec4 instance_color_in;
                              
 out vec4 enemy_color_out;
 out vec2 enemy_uv_out;
-out float enemy_dist_out;                                
+                                                           
 
 void main() {
     vec2 inst_pos = instance_pos_size_rot.xy;
@@ -35,5 +35,5 @@ void main() {
                                            
     enemy_color_out = instance_color_in;
     enemy_uv_out = quad_uv;
-    enemy_dist_out = length(quad_pos);                                                   
+                                                                                           
 }

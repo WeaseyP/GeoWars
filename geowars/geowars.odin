@@ -58,8 +58,12 @@ ENEMY_SPAWN_INTERVAL :: 10.0
 ENEMY_SPAWN_BORDER_FRACTION :: 0.5 
 ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ :: 0.5 * 0.5 
 ENEMY_MAX_SPAWN_ATTEMPTS :: 10
-ENEMY_INITIAL_SCALE_FACTOR :: 0.1 // MODIFIED: Start at 10% of full size
-ENEMY_GROW_DURATION :: 1.0      // MODIFIED: Grow over 1 second
+ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
+ENEMY_GROW_DURATION :: 1.0     
+ENEMY_MAX_ANGULAR_SPEED :: m.PI / 1.5 // Radians per second (e.g., 120 degrees/sec)
+ENEMY_BASE_ALPHA :: 0.65           // Base translucency for the enemy
+ENEMY_WANDER_INFLUENCE :: 0.35 // How much wander affects the main direction (0.0 = no wander, 1.0 = potentially strong deviation)
+ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 // Seconds between wander direction changes
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7
@@ -97,14 +101,18 @@ Particle_Instance_Data :: struct #align(16) {
 Enemy :: struct {
     pos: m.vec2,
     vel: m.vec2,
-    color: m.vec4,
-    // size: f32, // This will now be target_size
-    target_size: f32,      // MODIFIED: The final size of the enemy
-    current_size: f32,     // MODIFIED: The current animated size
-    grow_timer: f32,       // MODIFIED: Timer for the growth animation
-    is_growing: bool,      // MODIFIED: Flag to indicate growth phase
-    rotation: f32,
+    color: m.vec4,        
+    target_size: f32,      
+    current_size: f32,     
+    grow_timer: f32,       
+    is_growing: bool,      
+    rotation: f32,         
+    angular_vel: f32,    
     active: bool,
+
+    // MODIFIED: New fields for wandering
+    current_wander_vector: m.vec2,
+    wander_timer: f32,
 }
 
 Enemy_Instance_Data :: struct #align(16) {
@@ -376,19 +384,28 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
     }
     
     start_vel: m.vec2 = {0.0, 0.0} 
-    grunt_color := m.vec4{1.0, 1.0, 0.0, 1.0} 
+    base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
+    grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
+    initial_wander_angle := rand.float32() * m.TAU
+    initial_wander_vector := m.angle_to_vec2(initial_wander_angle)
 
-    grunt := Enemy {
+ grunt := Enemy {
         pos = start_pos,
         vel = start_vel,
         color = grunt_color, 
-        target_size = ENEMY_GRUNT_SCALE,                               // MODIFIED
-        current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, // MODIFIED
-        grow_timer = ENEMY_GROW_DURATION,                              // MODIFIED
-        is_growing = true,                                             // MODIFIED
-        rotation = 0.0,
-        active = false, // emit_enemy will set this to true
+        target_size = ENEMY_GRUNT_SCALE,                               
+        current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
+        grow_timer = ENEMY_GROW_DURATION,                              
+        is_growing = true,                                             
+        rotation = rand.float32() * m.TAU, 
+        angular_vel = (rand.float32_range(-1.0, 1.0)) * ENEMY_MAX_ANGULAR_SPEED, 
+        active = false,
+        // MODIFIED: Initialize wander fields
+        current_wander_vector = initial_wander_vector,
+        wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL), // Stagger initial changes
     }
+
+
     emit_enemy(grunt)
     fmt.printf("spawn_enemy: Spawning enemy -> Pos: %v, InitialSize: %f, TargetSize: %f, Color: %v\n", 
         grunt.pos, grunt.current_size, grunt.target_size, grunt.color)
@@ -420,21 +437,44 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress)
             }
         }
+        // --- ROTATION LOGIC (NEW) ---
+        enemy.rotation += enemy.angular_vel * dt;
+        // Optional: Keep rotation within 0 to TAU (2*PI) range
+        if enemy.rotation > m.TAU { enemy.rotation -= m.TAU }
+        if enemy.rotation < 0    { enemy.rotation += m.TAU }        
         // --- MOVEMENT LOGIC START ---
-        direction_to_player := player_pos - enemy.pos
+        enemy.wander_timer -= dt
+        if enemy.wander_timer <= 0.0 {
+            new_wander_angle := rand.float32() * m.TAU
+            enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle)
+            enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2) // Add some slight variance to interval
+        }
+        direction_to_player_strict := player_pos - enemy.pos
+
+        final_direction := direction_to_player_strict // Start with direct path to player
         // Check if the enemy is already at the player (or very close) to avoid NaN/Inf from normalization
         // and to prevent division by zero if using len_vec2 directly for normalization.
         // m.len_sq_vec2 is good here as it avoids a sqrt.
-        dist_sq_to_player := m.len_sq_vec2(direction_to_player)
+        dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict)
 
         if dist_sq_to_player > 0.001 { // Threshold to prevent issues if enemy is on top of player
             // Normalize the direction vector
             // m.norm_vec2 should handle zero-length vectors gracefully by returning a zero vector,
             // but the check above is a good practice.
-            normalized_direction := m.norm_vec2(direction_to_player)
-            enemy.vel = normalized_direction * ENEMY_GRUNT_SPEED
+            normalized_strict_direction := m.norm_vec2(direction_to_player_strict)
+            final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE)
+        } 
+        // Normalize the combined direction to maintain consistent speed influence
+        // (unless final_direction became a zero vector, e.g. if player_pos == enemy.pos and wander is zero)
+        if dist_sq_to_player > 0.00001 { // Check if final_direction is not zero
+            normalized_final_direction := m.norm_vec2(final_direction)
+            enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED
+        } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
+            // Fallback if final_direction was zero (e.g. wander perfectly opposed strict direction)
+            // but enemy is not yet at player. Just move directly to player.
+            enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED
         } else {
-            enemy.vel = m.vec2_zero() // Stop if at or very close to the player
+            enemy.vel = m.vec2_zero() // Stop if at or very close to the player and no clear direction
         }
         // --- MOVEMENT LOGIC END ---
         

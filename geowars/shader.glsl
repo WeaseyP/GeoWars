@@ -239,7 +239,7 @@ layout(location=3) in vec4 instance_color_in;     // .rgba color for the enemy i
 // Outputs to fragment shader
 out vec4 enemy_color_out;
 out vec2 enemy_uv_out;
-out float enemy_dist_out; // Distance from center of quad
+//out float enemy_dist_out; // Distance from center of quad
 
 void main() {
     vec2 inst_pos = instance_pos_size_rot.xy;
@@ -261,30 +261,77 @@ void main() {
     // Pass through data to fragment shader
     enemy_color_out = instance_color_in;
     enemy_uv_out = quad_uv;
-    enemy_dist_out = length(quad_pos); // Precalculate distance from center (0.0 to ~0.7)
+    //enemy_dist_out = length(quad_pos); // Precalculate distance from center (0.0 to ~0.7)
 }
 @end
 
 @fs fs_enemy
-layout(binding=1) uniform enemy_fs_params { float tick; }; // tick for future animations
+layout(binding=1) uniform enemy_fs_params { float tick; };
 
-in vec4 enemy_color_out; 
-in vec2 enemy_uv_out;    
-in float enemy_dist_out;  // This is still passed but not used for the simple box
+in vec4 enemy_color_out; // Base color and alpha from Odin instance data
+in vec2 enemy_uv_out;    // Quad UVs (0.0 to 1.0)
+// enemy_dist_out is not used in this new approach
 
 out vec4 frag_color;
 
+// Helper to rotate 2D vectors
+mat2 rotate2d(float angle) {
+    float s = sin(angle);
+    float c = cos(angle);
+    return mat2(c, -s, s, c); // Column-major matrix for standard multiplication: M * v
+}
+
+// SDF for an axis-aligned square given centered UVs (-0.5 to 0.5 range)
+// Returns distance; negative inside, positive outside.
+float sdf_rectangle(vec2 p, vec2 half_dims) { // Changed parameter
+    vec2 d = abs(p) - half_dims; // Use half_dims
+    return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
+}
+
 void main() {
-    // Base color from instance data
-    vec4 base_color = enemy_color_out;
+    vec2 uv_centered = enemy_uv_out - vec2(0.5);
 
-    // TRIVIAL USE OF TICK:
-    // Ensure the 'enemy_fs_params' uniform block (and 'tick') is not optimized away.
-    // We can make a tiny, almost unnoticeable modification to alpha.
-    // Since enemy_color_out.a should be 1.0, this will keep it opaque.
-    base_color.a *= (0.999 + 0.001 * sin(tick * 0.1f)); // Ensure tick is used
+    vec2 rectangle_half_dims = vec2(0.32, 0.12); // Keep these or adjust for oblong shape
+    
+    float aa = 0.025;
+    float pi = 3.14159265358979323846;
 
-    frag_color = base_color;
+    // MODIFIED: Define a common internal yaw speed
+    float internal_yaw_speed = 1.2; // Adjust this value for faster/slower internal yaw.
+                                    // This is a multiplier for tick.
+
+    // --- Diamond 1 ---
+    // MODIFIED: Use common speed, positive direction
+    float internal_rotation1 = (pi / 4.0) + tick * internal_yaw_speed; 
+    vec2 uv1_rotated = rotate2d(internal_rotation1) * uv_centered; 
+    float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims);
+    
+    vec3 color1_tip = enemy_color_out.rgb * 1.6 + vec3(0.3, 0.2, 0.3); 
+    vec3 gradient_color1 = mix(color1_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv1_rotated.y * 1.5)); 
+    float alpha_sdf1 = smoothstep(aa, 0.0, dist1); 
+
+    // --- Diamond 2 ---
+    // MODIFIED: Use common speed, negative direction
+    float internal_rotation2 = (-pi / 4.0) - tick * internal_yaw_speed; 
+    vec2 uv2_rotated = rotate2d(internal_rotation2) * uv_centered;
+    float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims);
+
+    vec3 color2_tip = enemy_color_out.rgb * 0.7 - vec3(0.1, 0.0, 0.1); 
+    vec3 gradient_color2 = mix(color2_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv2_rotated.x * 1.5));
+    float alpha_sdf2 = smoothstep(aa, 0.0, dist2); 
+
+    // ... (blending code remains the same) ...
+    vec4 frag1 = vec4(gradient_color1, alpha_sdf1 * enemy_color_out.a);
+    vec4 frag2 = vec4(gradient_color2, alpha_sdf2 * enemy_color_out.a);
+
+    vec3 blended_rgb = frag2.rgb * frag2.a + frag1.rgb * (1.0 - frag2.a);
+    float blended_alpha = frag2.a + frag1.a * (1.0 - frag2.a);
+    
+    frag_color = vec4(blended_rgb, blended_alpha);
+
+    if (frag_color.a < 0.01) {
+        discard;
+    }
 }
 @end
 
