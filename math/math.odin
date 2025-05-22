@@ -88,6 +88,12 @@ persp_mat4 :: proc(fov, aspect, near, far: f32) -> mat4 {
     m[3][3] = 0
     return m
 }
+lerp :: proc "contextless" (a, b: $T, t: $E) -> (x: T) {
+    // Ensure T supports multiplication with (1-t) and t, and addition.
+    // Ensure E can be subtracted from 1.
+    // For f32, this works perfectly.
+    return a*(1-t) + b*t;
+}
 
 lookat :: proc {
     lookat_mat4,

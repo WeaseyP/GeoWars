@@ -7,7 +7,6 @@
 @ctype vec2 m.vec2
 @ctype vec4 m.vec4 // Added for particle color instance data
 
-// --- Background Shaders (Keep existing from older version) ---
 
 @vs vs_bg
 in vec2 position; // Location 0
@@ -90,7 +89,6 @@ void main() { // fs_bg main
 @end
 @program bg vs_bg fs_bg
 
-// --- Player Shaders (Keep existing from older version) ---
 
 @vs vs_player
 layout(binding=0) uniform Player_Vs_Params { mat4 mvp; }; // Compact uniform block definition
@@ -225,3 +223,69 @@ void main() {
 }
 @end
 @program particle vs_particle fs_particle
+
+// --- Enemy Shaders ---
+@vs vs_enemy
+layout(binding=0) uniform enemy_vs_params { mat4 view_proj; };
+
+// Per-vertex attributes for the base quad
+layout(location=0) in vec2 quad_pos; // -0.5 to 0.5 (Same as particles for reuse)
+layout(location=1) in vec2 quad_uv;  // 0.0 to 1.0 (Same as particles for reuse)
+
+// Per-instance attributes for enemies
+layout(location=2) in vec4 instance_pos_size_rot; // .xy=pos, .z=size, .w=rotation (rotation for future use)
+layout(location=3) in vec4 instance_color_in;     // .rgba color for the enemy instance
+
+// Outputs to fragment shader
+out vec4 enemy_color_out;
+out vec2 enemy_uv_out;
+out float enemy_dist_out; // Distance from center of quad
+
+void main() {
+    vec2 inst_pos = instance_pos_size_rot.xy;
+    float inst_size = instance_pos_size_rot.z;
+    float inst_rot = instance_pos_size_rot.w; // Rotation not used visually yet, but passed
+
+    // Apply instance rotation and scale to base quad vertex position
+    float cr = cos(inst_rot);
+    float sr = sin(inst_rot);
+    mat2 rot_mat = mat2(cr, -sr, sr, cr);
+    vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
+
+    // Add instance world position
+    vec2 final_world_pos = final_local_pos + inst_pos;
+
+    // Project to screen
+    gl_Position = view_proj * vec4(final_world_pos, 0.0, 1.0);
+
+    // Pass through data to fragment shader
+    enemy_color_out = instance_color_in;
+    enemy_uv_out = quad_uv;
+    enemy_dist_out = length(quad_pos); // Precalculate distance from center (0.0 to ~0.7)
+}
+@end
+
+@fs fs_enemy
+layout(binding=1) uniform enemy_fs_params { float tick; }; // tick for future animations
+
+in vec4 enemy_color_out; 
+in vec2 enemy_uv_out;    
+in float enemy_dist_out;  // This is still passed but not used for the simple box
+
+out vec4 frag_color;
+
+void main() {
+    // Base color from instance data
+    vec4 base_color = enemy_color_out;
+
+    // TRIVIAL USE OF TICK:
+    // Ensure the 'enemy_fs_params' uniform block (and 'tick') is not optimized away.
+    // We can make a tiny, almost unnoticeable modification to alpha.
+    // Since enemy_color_out.a should be 1.0, this will keep it opaque.
+    base_color.a *= (0.999 + 0.001 * sin(tick * 0.1f)); // Ensure tick is used
+
+    frag_color = base_color;
+}
+@end
+
+@program enemy vs_enemy fs_enemy
