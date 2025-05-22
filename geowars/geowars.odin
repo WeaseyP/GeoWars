@@ -803,6 +803,8 @@ frame :: proc "c" () {
         resolution={width,height},
         player_hp_uniform=f32(state.player_hp), // Pass current HP to shader
         player_max_hp_uniform=f32(state.player_max_hp),
+        player_invulnerable_timer_uniform = state.player_invulnerable_timer,
+        player_invulnerability_duration_uniform = PLAYER_INVULNERABILITY_DURATION,
     }; 
     state.particle_fs_params={tick=current_time};
     state.enemy_fs_params={tick=current_time}; 
