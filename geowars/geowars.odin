@@ -74,16 +74,31 @@ ENEMY_MAX_ANGULAR_SPEED :: m.PI / 1.5
 ENEMY_BASE_ALPHA :: 0.65           
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
+ENEMY_GRUNT_MAX_HP :: 2
 
 // Enemy Death Particle Constants
-ENEMY_DEATH_PARTICLE_COUNT :: 20
-ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
-ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
-ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  // Slightly faster burst
-ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
-ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 // Slightly larger burst particles
-ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
-ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.5 // Slower spin than RMB particles
+LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
+LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  // Slightly faster burst
+LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
+LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 // Slightly larger burst particles
+LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
+LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.5 // Slower spin than RMB particles
+
+// RMB Enemy Death Particle Constants
+RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 // Smaller burst
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
+RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
+RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.2
+RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 // Smaller particles
+RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
+RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
+RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} // Consistent with spawn_swirling_charge visual
+
+
+
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7
@@ -147,6 +162,7 @@ Enemy :: struct {
     is_growing: bool,      
     rotation: f32,         
     angular_vel: f32,    
+    hp: i32, // <<< NEW: Enemy health
     active: bool,
     current_wander_vector: m.vec2,
     wander_timer: f32,
@@ -368,15 +384,15 @@ update_and_instance_particles :: proc(dt: f32) -> int {
 	return live_particle_count
 }
 
-spawn_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
+spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
 	context = runtime.default_context()
-	for _ in 0..<ENEMY_DEATH_PARTICLE_COUNT {
+	for _ in 0..<LMB_ENEMY_DEATH_PARTICLE_COUNT {
 		angle := rand.float32() * m.TAU
 		dir := m.angle_to_vec2(angle)
-		speed := ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * ENEMY_DEATH_PARTICLE_SPEED_RAND
-		life := ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * ENEMY_DEATH_PARTICLE_LIFETIME_RAND
-		size := ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * ENEMY_DEATH_PARTICLE_SIZE_RAND
-		angular_vel := rand.float32_range(-1.0, 1.0) * ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
+		speed := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND
+		life := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
+		size := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
+		angular_vel := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
 		
 		particle_color := base_color;
 		// Make particles a bit brighter and less saturated than the enemy's base color for a "burst" feel
@@ -405,7 +421,116 @@ spawn_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
 	}
 }
 
-check_projectile_enemy_collisions :: proc() {
+spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
+	context = runtime.default_context()
+	base_death_color := RMB_PARTICLE_COLOR; // Use the RMB ability's color scheme
+
+	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
+		angle := rand.float32() * m.TAU
+		dir := m.angle_to_vec2(angle)
+		speed := RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND
+		life := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
+		size := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
+		angular_vel := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
+		
+		// Particle color can be directly from RMB_PARTICLE_COLOR or slightly varied
+		particle_color := base_death_color;
+		particle_color.r = math.clamp(base_death_color.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
+		particle_color.g = math.clamp(base_death_color.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
+		particle_color.b = math.clamp(base_death_color.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
+		particle_color.a = rand.float32_range(0.6, 0.9); // Start fairly opaque
+
+		emit_particle(Particle{
+			pos              = pos,
+			vel              = dir * speed,
+			cloud_travel_vel = {0,0}, 
+			color            = particle_color,
+			size             = size,
+			start_size       = size,
+			life_remaining   = life,
+			life_max         = life,      
+			swirl_duration   = 0,      
+			rotation         = rand.float32() * m.TAU,
+			angular_vel      = angular_vel,
+			charge_center_pos= {0,0}, 
+			is_burst_particle= true, // Mark as a burst particle so it behaves like other death particles (fades out, etc.)
+			is_swirling_charge= false, 
+			active           = false, 
+		})
+	}
+}
+
+check_RMB_particle_enemy_collisions :: proc() {
+    context = runtime.default_context()
+    for i in 0..<MAX_PARTICLES {
+        particle := &state.particles[i]
+
+        // --- MODIFIED CONDITION ---
+        // Check if particle is active AND is part of the RMB ability (either swirling or exploded).
+        // Exclude generic burst particles (e.g., from LMB enemy deaths or other future effects).
+        // A particle from RMB is either:
+        //    1. is_swirling_charge = true (initial phase)
+        //    2. is_swirling_charge = false AND is_burst_particle = false (explosion phase after swirl)
+        // We want to damage with both. So, we only skip if it's inactive OR it's a generic burst particle
+        // that isn't part of the RMB attack's lifecycle.
+        if !particle.active || (particle.is_burst_particle && !particle.is_swirling_charge) { 
+            // If it's a burst particle BUT NOT a swirling charge that just turned into an explosion,
+            // then it's likely a death particle from another source (like LMB kill), so skip.
+            // However, if is_burst_particle is true because an RMB particle just exploded,
+            // it would have had is_swirling_charge = false already.
+            // The simpler way for RMB damage is: if it's active and NOT a generic death burst, it can hit.
+            // For RMB, is_burst_particle is set to true for ITS death particles, but those don't damage.
+            // The damaging parts of RMB are when is_swirling_charge=true OR 
+            // (is_swirling_charge=false AND is_burst_particle=false for the explosion phase).
+            // The existing spawn_RMB_enemy_death_particles sets is_burst_particle = true.
+            // The spawn_swirling_charge sets is_swirling_charge = true.
+            // The update_and_instance_particles, when swirl ends, sets is_swirling_charge = false 
+            // and does NOT set is_burst_particle = true for the damaging explosion particles.
+
+            // Revised logic:
+            // Active particles that are either swirling OR are from the RMB explosion phase (not generic bursts)
+            if particle.is_burst_particle { // Generic death particles (from LMB kills or RMB kills) should not deal damage
+                continue
+            }
+            // Now, particle is either swirling_charge OR an RMB_explosion_particle
+            // Both should be able to deal damage.
+        }
+        // --- END MODIFIED CONDITION ---
+        
+        particle_radius := particle.size * 0.5 
+        if particle_radius <= 0.001 { continue }
+
+
+        for j in 0..<MAX_ENEMIES {
+            enemy := &state.enemies[j]
+            if !enemy.active { 
+                continue
+            }
+
+            enemy_radius := enemy.current_size * 0.5
+            if enemy_radius <= 0.001 { continue }
+
+            dist_sq := m.len_sq_vec2(particle.pos - enemy.pos)
+            radii_sum := particle_radius + enemy_radius
+            radii_sum_sq := radii_sum * radii_sum
+
+            if dist_sq < radii_sum_sq {
+                enemy.hp -= 1 
+
+                particle.active = false 
+
+                if enemy.hp <= 0 {
+                    enemy.active = false 
+                    spawn_RMB_enemy_death_particles(enemy.pos) 
+                }
+                
+                break 
+            }
+        }
+    }
+}
+
+check_LMB_projectile_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_BLACKHOLES {
         proj := &state.blackholes[i]
@@ -435,7 +560,7 @@ check_projectile_enemy_collisions :: proc() {
                 proj.active = false    // Projectile is consumed
                 enemy.active = false   // Enemy is hit/destroyed
                 
-                spawn_enemy_death_particles(enemy.pos, enemy.color) // Spawn death effect
+                spawn_LMB_enemy_death_particles(enemy.pos, enemy.color) // Spawn death effect
 
                 // Since projectile is consumed, it cannot hit another enemy in this frame.
                 break // from inner enemy loop (j)
@@ -583,6 +708,7 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
         target_size = ENEMY_GRUNT_SCALE, current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
         grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
         rotation = rand.float32() * m.TAU, angular_vel = (rand.float32_range(-1.0, 1.0)) * ENEMY_MAX_ANGULAR_SPEED, 
+        hp = ENEMY_GRUNT_MAX_HP, 
         active = false, current_wander_vector = initial_wander_vector,
         wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL), 
     }
@@ -708,7 +834,8 @@ frame :: proc "c" () {
     state.num_active_blackholes = update_and_instance_blackholes(delta_time);
 
     // --- Collision Detection ---
-    check_projectile_enemy_collisions();
+    check_LMB_projectile_enemy_collisions();
+    check_RMB_particle_enemy_collisions();
 
     // --- Setup Uniforms & View Projection ---
     state.bg_fs_params={tick=current_time, resolution={width,height}, bg_option=1}; 
