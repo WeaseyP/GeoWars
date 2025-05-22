@@ -411,70 +411,163 @@ void main() {
 @end
 @program blackhole vs_blackhole fs_blackhole
 
-
-// --- Enemy Shaders ---
 @vs vs_enemy
-// ... (vs_enemy remains the same) ...
 layout(binding=0) uniform enemy_vs_params { mat4 view_proj; };
-layout(location=0) in vec2 quad_pos; 
-layout(location=1) in vec2 quad_uv;  
-layout(location=2) in vec4 instance_pos_size_rot; 
-layout(location=3) in vec4 instance_color_in;     
-out vec4 enemy_color_out;
-out vec2 enemy_uv_out;
+
+// Per-vertex attributes for the base quad (Buffer 0)
+layout(location=0) in vec2 quad_pos_in;     // Using a different name for global 'in'
+layout(location=1) in vec2 quad_uv_in;      // Using a different name for global 'in'
+
+// Per-instance attributes (Buffer 1)
+layout(location=2) in vec2 instance_pos_vs_in;
+layout(location=3) in float instance_main_rotation_vs_in;
+layout(location=4) in float instance_visual_scale_vs_in;   // This will be the enemy's current world size
+layout(location=5) in vec4 instance_color_vs_in;      
+layout(location=6) in vec4 instance_effect_params_vs_in; 
+
+// Outputs to fragment shader
+out vec4 enemy_color_out_fs;
+out vec2 enemy_uv_out_fs;
+out vec4 enemy_effect_params_fs; 
+out float enemy_visual_scale_fs_out;
+
+// main() now takes NO parameters
 void main() {
-    vec2 inst_pos = instance_pos_size_rot.xy;
-    float inst_size = instance_pos_size_rot.z;
-    float inst_rot = instance_pos_size_rot.w; 
-    float cr = cos(inst_rot);
-    float sr = sin(inst_rot);
-    mat2 rot_mat = mat2(cr, -sr, sr, cr);
-    vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
-    vec2 final_world_pos = final_local_pos + inst_pos;
+    // Use the globally declared 'in' variables directly
+    float final_size_for_quad = instance_visual_scale_vs_in; // instance_visual_scale_vs_in IS the world size
+
+    float cr = cos(instance_main_rotation_vs_in);
+    float sr = sin(instance_main_rotation_vs_in);
+    mat2 main_rot_mat = mat2(cr, -sr, sr, cr);
+    
+    // quad_pos_in is -0.5 to 0.5.
+    vec2 scaled_quad_pos = quad_pos_in * final_size_for_quad; 
+    vec2 rotated_quad_pos = main_rot_mat * scaled_quad_pos;
+    vec2 final_world_pos = rotated_quad_pos + instance_pos_vs_in;
+
     gl_Position = view_proj * vec4(final_world_pos, 0.0, 1.0);
-    enemy_color_out = instance_color_in;
-    enemy_uv_out = quad_uv;
+    
+    enemy_color_out_fs = instance_color_vs_in;
+    enemy_uv_out_fs = quad_uv_in; 
+    enemy_effect_params_fs = instance_effect_params_vs_in;
+    enemy_visual_scale_fs_out = instance_visual_scale_vs_in; 
 }
 @end
-
 @fs fs_enemy
-// ... (fs_enemy remains the same) ...
 layout(binding=1) uniform enemy_fs_params { float tick; };
-in vec4 enemy_color_out; 
-in vec2 enemy_uv_out;    
+
+in vec4 enemy_color_out_fs; 
+in vec2 enemy_uv_out_fs;    
+in vec4 enemy_effect_params_fs; // .x = is_dying, .y = death_rect_offset
+in float enemy_visual_scale_fs_out;  // Current overall WORLD size of the enemy (name changed)
+
 out vec4 frag_color;
+
 mat2 rotate2d(float angle) {
     float s = sin(angle);
     float c = cos(angle);
     return mat2(c, -s, s, c); 
 }
+
 float sdf_rectangle(vec2 p, vec2 half_dims) { 
     vec2 d = abs(p) - half_dims; 
     return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
 }
+
 void main() {
-    vec2 uv_centered = enemy_uv_out - vec2(0.5);
-    vec2 rectangle_half_dims = vec2(0.32, 0.12); 
-    float aa = 0.025;
+    vec2 uv_centered = enemy_uv_out_fs - vec2(0.5);
+
+    float is_dying = enemy_effect_params_fs.x;
+    float death_offset_world_units = enemy_effect_params_fs.y;
+    float current_part_scale_multiplier = enemy_effect_params_fs.z;
+    float overall_dying_alpha_multiplier = enemy_effect_params_fs.w;
+
+    vec2 rectangle_half_dims_uv = vec2(0.32, 0.12); // Base UV dimensions
+
+    // Effective world size of a PART if it were at full UV scale (0.32, 0.12) on the current quad
+    float part_effective_world_width_at_full_uv = rectangle_half_dims_uv.x * 2.0 * enemy_visual_scale_fs_out;
+
+    if (is_dying > 0.5) {
+        rectangle_half_dims_uv *= current_part_scale_multiplier; // Shrink UV dimensions
+        // For dying, the "visual size" of the part is now smaller.
+        // Update the effective world width for AA calculation based on the shrunken part.
+        part_effective_world_width_at_full_uv *= current_part_scale_multiplier;
+    }
+
+    float aa_world = 0.005; // AA in world units
+    // Calculate AA in UV space.
+    // If the part is very small, max(0.01, ...) prevents division by zero or extremely large AA.
+    float aa_uv = aa_world / max(0.01, part_effective_world_width_at_full_uv);
+    // Alternative for aa_uv, which might be simpler:
+    // float aa_uv = aa_world / max(0.01, enemy_visual_scale_fs_out * current_part_scale_multiplier * (rectangle_half_dims_uv.x * 2.0));
+    // The above might still have issues if rectangle_half_dims_uv.x becomes 0 due to current_part_scale_multiplier.
+    // Let's stick to the current `aa_uv` calculation first, but scale it by the inverse of the part_scale_multiplier
+    // if it's dying, because rectangle_half_dims_uv is already scaled down.
+    // No, the `aa` in `smoothstep(aa, 0.0, dist)` should be relative to the coordinate space of `dist`.
+    // `dist` is calculated using `rectangle_half_dims_uv` which are already scaled.
+    // So, `aa` should also be in that scaled UV space.
+
+    // Let's simplify the AA logic:
+    // `aa` is the transition width for smoothstep. It should be a small fraction of the shape's feature size.
+    // The feature size here is related to `rectangle_half_dims_uv`.
+    // Let `aa` be a constant fraction of the smallest dimension of the (potentially shrunken) rectangle.
+    float aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.1; // e.g., 10% of smallest half-dim
+    aa_sdf_space = max(aa_sdf_space, 0.0001); // Ensure it's not too small
+
+    // Convert world separation offset to UV separation offset
+    float death_offset_uv = 0.0;
+    if (enemy_visual_scale_fs_out > 0.01) { // enemy_visual_scale_fs_out is quad's world size
+        death_offset_uv = death_offset_world_units / enemy_visual_scale_fs_out;
+    }
+
     float pi = 3.14159265358979323846;
-    float internal_yaw_speed = 1.2; 
-    float internal_rotation1 = (pi / 4.0) + tick * internal_yaw_speed; 
-    vec2 uv1_rotated = rotate2d(internal_rotation1) * uv_centered; 
-    float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims);
-    vec3 color1_tip = enemy_color_out.rgb * 1.6 + vec3(0.3, 0.2, 0.3); 
-    vec3 gradient_color1 = mix(color1_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv1_rotated.y * 1.5)); 
-    float alpha_sdf1 = smoothstep(aa, 0.0, dist1); 
-    float internal_rotation2 = (-pi / 4.0) - tick * internal_yaw_speed; 
-    vec2 uv2_rotated = rotate2d(internal_rotation2) * uv_centered;
-    float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims);
-    vec3 color2_tip = enemy_color_out.rgb * 0.7 - vec3(0.1, 0.0, 0.1); 
-    vec3 gradient_color2 = mix(color2_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv2_rotated.x * 1.5));
-    float alpha_sdf2 = smoothstep(aa, 0.0, dist2); 
-    vec4 frag1 = vec4(gradient_color1, alpha_sdf1 * enemy_color_out.a);
-    vec4 frag2 = vec4(gradient_color2, alpha_sdf2 * enemy_color_out.a);
-    vec3 blended_rgb = frag2.rgb * frag2.a + frag1.rgb * (1.0 - frag2.a);
-    float blended_alpha = frag2.a + frag1.a * (1.0 - frag2.a);
+    float internal_yaw_speed = 1.2;
+
+    // --- Rectangle 1 ---
+    vec2 uv1_transformed = uv_centered;
+    if (is_dying > 0.5) {
+        uv1_transformed.y -= death_offset_uv * 0.5;
+    }
+    float internal_rotation1 = (pi / 4.0) + tick * internal_yaw_speed;
+    vec2 uv1_rotated = rotate2d(internal_rotation1) * uv1_transformed;
+    float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims_uv);
+    vec3 color1_tip = enemy_color_out_fs.rgb * 1.6 + vec3(0.3, 0.2, 0.3);
+    vec3 gradient_color1 = mix(color1_tip, enemy_color_out_fs.rgb, smoothstep(-0.5, 0.5, uv1_rotated.y * 1.5));
+    float alpha_sdf1 = smoothstep(aa_sdf_space, 0.0, dist1); // Use new AA
+
+    // --- Rectangle 2 ---
+    vec2 uv2_transformed = uv_centered;
+     if (is_dying > 0.5) {
+        uv2_transformed.y += death_offset_uv * 0.5;
+    }
+    float internal_rotation2 = (-pi / 4.0) - tick * internal_yaw_speed;
+    vec2 uv2_rotated = rotate2d(internal_rotation2) * uv2_transformed;
+    float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims_uv);
+    vec3 color2_tip = enemy_color_out_fs.rgb * 0.7 - vec3(0.1, 0.0, 0.1);
+    vec3 gradient_color2 = mix(color2_tip, enemy_color_out_fs.rgb, smoothstep(-0.5, 0.5, uv2_rotated.x * 1.5));
+    float alpha_sdf2 = smoothstep(aa_sdf_space, 0.0, dist2); // Use new AA
+
+    float base_alpha = enemy_color_out_fs.a;
+    if (is_dying > 0.5) {
+        base_alpha *= overall_dying_alpha_multiplier;
+    }
+
+    vec4 frag1_color = vec4(gradient_color1, alpha_sdf1 * base_alpha);
+    vec4 frag2_color = vec4(gradient_color2, alpha_sdf2 * base_alpha);
+    // ... rest of the blending logic ...
+    vec3 blended_rgb;
+    float blended_alpha;
+
+    if (is_dying > 0.5) {
+         blended_rgb = frag1_color.rgb * frag1_color.a + frag2_color.rgb * frag2_color.a;
+         blended_alpha = max(frag1_color.a, frag2_color.a);
+    } else {
+        blended_rgb = frag2_color.rgb * frag2_color.a + frag1_color.rgb * frag1_color.a * (1.0 - frag2_color.a);
+        blended_alpha = frag2_color.a + frag1_color.a * (1.0 - frag2_color.a);
+    }
+    
     frag_color = vec4(blended_rgb, blended_alpha);
+
     if (frag_color.a < 0.01) {
         discard;
     }

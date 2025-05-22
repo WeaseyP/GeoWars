@@ -28,7 +28,7 @@ PLAYER_ACCELERATION      :: 15.0
 PLAYER_REVERSE_FACTOR    :: 0.5
 PLAYER_DAMPING           :: 2.5
 PLAYER_MAX_SPEED         :: 7.0
-PLAYER_SCALE             :: 0.25
+PLAYER_SCALE             :: 0.1
 PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
 PLAYER_CORE_SHADER_RADIUS :: 0.04
 PLAYER_UV_SPACE_EXTENT   :: 0.5
@@ -69,19 +69,23 @@ PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY :: m.PI * 1.5
 
 
 // --- Enemy Constants ---
-ENEMY_GRUNT_SCALE :: 0.15
-ENEMY_GRUNT_SPEED :: 1.0 
+ENEMY_GRUNT_SCALE :: 0.2
+ENEMY_GRUNT_SPEED :: 0.5 
 ENEMY_SPAWN_INTERVAL :: 0.5
 ENEMY_SPAWN_BORDER_FRACTION :: 0.5 
 ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ :: 0.5 * 0.5 
 ENEMY_MAX_SPAWN_ATTEMPTS :: 10
 ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
 ENEMY_GROW_DURATION :: 1.0     
-ENEMY_MAX_ANGULAR_SPEED :: m.PI / 1.5 
+ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7
 ENEMY_BASE_ALPHA :: 0.65           
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
 ENEMY_GRUNT_MAX_HP :: 2
+ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
+ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
+ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
+ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
@@ -91,7 +95,7 @@ LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5
 LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
 LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
 LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
-LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.5 
+LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.75
 
 // RMB Enemy Death Particle Constants
 RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
@@ -181,14 +185,18 @@ Enemy :: struct {
     active: bool,
     current_wander_vector: m.vec2,
     wander_timer: f32,
+    is_dying: bool,
+    dying_timer: f32,
+    death_rect_offset: f32,
 }
 
 Enemy_Instance_Data :: struct #align(16) {
     using _: struct #packed {
-        instance_pos: m.vec2,
-        instance_size: f32,
-        instance_rotation: f32,
-        instance_color: m.vec4, 
+        instance_pos: m.vec2,         
+        instance_main_rotation: f32,  
+        instance_visual_scale: f32,   
+        instance_color: m.vec4,       
+        instance_effect_params: m.vec4,
     },
 }
 
@@ -280,11 +288,27 @@ init :: proc "c" () {
     else { fmt.printf("--- Blackhole pipeline created successfully ---\n"); }
 
 
-    state.enemy_pip = sg.make_pipeline({ label="enemy-pip", shader=enemy_shd,
-        layout={ buffers={0={stride=enemy_quad_stride, step_func=.PER_VERTEX}, 1={stride=size_of(Enemy_Instance_Data), step_func=.PER_INSTANCE}},
-                 attrs={ ATTR_enemy_quad_pos={buffer_index=0,offset=0,format=.FLOAT2}, ATTR_enemy_quad_uv={buffer_index=0,offset=8,format=.FLOAT2},
-                         ATTR_enemy_instance_pos_size_rot={buffer_index=1,offset=0,format=.FLOAT4}, ATTR_enemy_instance_color_in={buffer_index=1,offset=16,format=.FLOAT4} }},
-        primitive_type=.TRIANGLE_STRIP, colors={0={blend={enabled=true, src_factor_rgb=.SRC_ALPHA, dst_factor_rgb=.ONE_MINUS_SRC_ALPHA}}}, depth={write_enabled=false, compare=.ALWAYS}
+    state.enemy_pip = sg.make_pipeline({ 
+        label="enemy-pip", 
+        shader=enemy_shd,
+        layout={ 
+            buffers={
+                0={stride=enemy_quad_stride, step_func=.PER_VERTEX},
+                1={stride=size_of(Enemy_Instance_Data), step_func=.PER_INSTANCE}
+            },
+            attrs={ 
+                ATTR_enemy_quad_pos_in={buffer_index=0,offset=0,format=.FLOAT2}, 
+                ATTR_enemy_quad_uv_in={buffer_index=0,offset=8,format=.FLOAT2},
+                ATTR_enemy_instance_pos_vs_in={buffer_index=1,offset=0,format=.FLOAT2}, // <<< CORRECTED HERE
+                ATTR_enemy_instance_main_rotation_vs_in={buffer_index=1,offset=8,format=.FLOAT},
+                ATTR_enemy_instance_visual_scale_vs_in={buffer_index=1,offset=12,format=.FLOAT},
+                ATTR_enemy_instance_color_vs_in={buffer_index=1,offset=16,format=.FLOAT4}, 
+                ATTR_enemy_instance_effect_params_vs_in={buffer_index=1,offset=32,format=.FLOAT4},
+            }
+        },
+        primitive_type=.TRIANGLE_STRIP, 
+        colors={0={blend={enabled=true, src_factor_rgb=.SRC_ALPHA, dst_factor_rgb=.ONE_MINUS_SRC_ALPHA}}}, 
+        depth={write_enabled=false, compare=.ALWAYS}
     })
     if sg.query_pipeline_state(state.enemy_pip) != .VALID { fmt.eprintf("!!! CRITICAL: Enemy pipeline creation failed!\n"); }
 
@@ -589,26 +613,42 @@ check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
         particle := &state.particles[i]
-        if !particle.active || particle.is_burst_particle { 
+        // Ensure it's a damaging particle, not an ammo indicator or already burst
+        if !particle.active || particle.is_burst_particle || particle.is_ammo_indicator || !particle.is_swirling_charge { 
             continue
         }
         particle_radius := particle.size * 0.5 
         if particle_radius <= 0.001 { continue }
+
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
-            if !enemy.active { continue }
+            if !enemy.active { continue } // Check if enemy is active
+            // Add this check: if enemy.is_dying { continue; } // Skip if already dying
+            
             enemy_radius := enemy.current_size * 0.5
             if enemy_radius <= 0.001 { continue }
+
             dist_sq := m.len_sq_vec2(particle.pos - enemy.pos)
             radii_sum := particle_radius + enemy_radius
             radii_sum_sq := radii_sum * radii_sum
+
             if dist_sq < radii_sum_sq {
-                enemy.hp -= 1 
-                particle.active = false 
-                if enemy.hp <= 0 {
-                    enemy.active = false 
-                    spawn_RMB_enemy_death_particles(enemy.pos) 
+                // RMB particles might do more than 1 damage, or enemy HP might be > 1
+                // So, damage first, then check HP.
+                enemy.hp -= PARTICLE_DAMAGE_VALUE // Assuming PARTICLE_DAMAGE_VALUE is defined (it is, as 1)
+                particle.active = false // Particle is consumed
+
+                if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
+                    enemy.is_dying = true;
+                    enemy.dying_timer = ENEMY_DEATH_ANIM_DURATION;
+                    enemy.death_rect_offset = 0.0;
+                    // enemy.angular_vel = 0; // Optional
+
+                    // --- ADD PARTICLE SPAWN ---
+                    spawn_RMB_enemy_death_particles(enemy.pos); 
+                    // --- END ADD ---
                 }
+                // If particle is consumed, break from inner loop (checking this particle against other enemies)
                 break 
             }
         }
@@ -623,15 +663,28 @@ check_LMB_projectile_enemy_collisions :: proc() {
         proj_radius := proj.size * 0.5
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
-            if !enemy.active { continue }
+            if !enemy.active { continue } // Check if enemy is active
+            // Add this check: if enemy.is_dying { continue; } // Skip if already dying
+
             enemy_radius := enemy.current_size * 0.5
             dist_sq := m.len_sq_vec2(proj.pos - enemy.pos)
             radii_sum := proj_radius + enemy_radius
             radii_sum_sq := radii_sum * radii_sum
+
             if dist_sq < radii_sum_sq {
-                proj.active = false    
-                enemy.active = false   
-                spawn_LMB_enemy_death_particles(enemy.pos, enemy.color) 
+                proj.active = false    // Projectile is consumed
+                
+                if !enemy.is_dying { // Only start dying if not already
+                    enemy.hp = 0; 
+                    enemy.is_dying = true;
+                    enemy.dying_timer = ENEMY_DEATH_ANIM_DURATION;
+                    enemy.death_rect_offset = 0.0;
+                    // enemy.angular_vel = 0; // Optional
+
+                    // --- ADD PARTICLE SPAWN ---
+                    spawn_LMB_enemy_death_particles(enemy.pos, enemy.color); 
+                    // --- END ADD ---
+                }
                 break 
             }
         }
@@ -783,63 +836,143 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
     grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
     initial_wander_angle := rand.float32() * m.TAU
     initial_wander_vector := m.angle_to_vec2(initial_wander_angle)
-    grunt := Enemy {
+grunt := Enemy {
         pos = start_pos, vel = start_vel, color = grunt_color, 
         target_size = ENEMY_GRUNT_SCALE, current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
         grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
-        rotation = rand.float32() * m.TAU, angular_vel = (rand.float32_range(-1.0, 1.0)) * ENEMY_MAX_ANGULAR_SPEED, 
+        rotation = rand.float32() * m.TAU, 
+        angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED, // Spin between -MAX and +MAX
         hp = ENEMY_GRUNT_MAX_HP, 
         active = false, current_wander_vector = initial_wander_vector,
         wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL), 
     }
     emit_enemy(grunt)
 }
-
 update_and_instance_enemies :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_enemy_count := 0
-    player_pos := state.player_pos 
+    player_pos := state.player_pos
+
     for i in 0..<MAX_ENEMIES {
         if !state.enemies[i].active { continue }
         enemy := &state.enemies[i]
-        if enemy.is_growing {
-            enemy.grow_timer -= dt
-            if enemy.grow_timer <= 0.0 {
-                enemy.current_size = enemy.target_size; enemy.is_growing = false; enemy.grow_timer = 0.0;
-            } else {
-                progress := 1.0 - (enemy.grow_timer / ENEMY_GROW_DURATION); progress = math.clamp(progress, 0.0, 1.0);
-                initial_actual_size := enemy.target_size * ENEMY_INITIAL_SCALE_FACTOR
-                enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress)
+
+        current_visual_scale_for_shader: f32
+        effect_params_x: f32 = 0.0; // is_dying
+        effect_params_y: f32 = 0.0; // death_rect_offset
+        effect_params_z: f32 = 1.0; // current_dying_part_scale_multiplier (default to 1.0)
+        //effect_params_z = m.lerp(f32(1.0), ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale); // This will now correctly lerp from 1.0 to 0.0
+        effect_params_w: f32 = 1.0; // overall_dying_alpha_multiplier (default to 1.0)
+
+
+        if enemy.is_dying {
+            effect_params_x = 1.0; // Signal to shader that it's dying
+
+            enemy.dying_timer -= dt;
+            enemy.death_rect_offset += ENEMY_DEATH_RECT_SEPARATION_SPEED * dt;
+            effect_params_y = enemy.death_rect_offset;
+
+            if enemy.dying_timer <= 0.0 {
+                enemy.active = false;
+                continue;
             }
+
+            // Progress from 0.0 (start of death) to 1.0 (end of death timer)
+            progress_raw := 1.0 - math.clamp(enemy.dying_timer / ENEMY_DEATH_ANIM_DURATION, 0.0, 1.0);
+            eased_progress_for_scale := math.pow(progress_raw, 2.5); // For slower shrink at start
+
+            // Scale multiplier for the individual rectangle parts
+            effect_params_z = m.lerp(f32(1.0), ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale);
+
+            // Alpha multiplier - fade out linearly from 1.0 to 0.0 over the duration
+            // You can apply easing here too if desired, e.g., math.pow(progress_raw, N) for fade speed
+            effect_params_w = 1.0 - progress_raw;
+
+
+            // The quad itself remains at the original target size during death
+            current_visual_scale_for_shader = enemy.target_size  * ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
+            
+            // enemy.current_size can still represent the conceptual "bounding" size if needed elsewhere,
+            // but it's not directly driving the quad's render scale during death.
+            enemy.current_size = enemy.target_size * effect_params_z;
+
+
+        } else if enemy.is_growing {
+            enemy.grow_timer -= dt;
+            if enemy.grow_timer <= 0.0 {
+                enemy.current_size = enemy.target_size;
+                enemy.is_growing = false;
+                enemy.grow_timer = 0.0;
+            } else {
+                progress := 1.0 - (enemy.grow_timer / ENEMY_GROW_DURATION);
+                progress = math.clamp(progress, 0.0, 1.0);
+                initial_actual_size := enemy.target_size * ENEMY_INITIAL_SCALE_FACTOR;
+                enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress);
+            }
+            current_visual_scale_for_shader = enemy.current_size;
+            // Movement and rotation for growing
+            enemy.rotation += enemy.angular_vel * dt;
+            enemy.wander_timer -= dt;
+            if enemy.wander_timer <= 0.0 {
+                new_wander_angle := rand.float32() * m.TAU;
+                enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
+                enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+            }
+            direction_to_player_strict := player_pos - enemy.pos;
+            final_direction := direction_to_player_strict;
+            dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict);
+            if dist_sq_to_player > 0.001 {
+                normalized_strict_direction := m.norm_vec2(direction_to_player_strict);
+                final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+            }
+            if dist_sq_to_player > 0.00001 {
+                normalized_final_direction := m.norm_vec2(final_direction);
+                enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED;
+            } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
+                enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED;
+            } else { enemy.vel = m.vec2_zero(); }
+            enemy.pos += enemy.vel * dt;
+
+        } else { // Alive and not growing (normal behavior)
+            enemy.current_size = enemy.target_size;
+            current_visual_scale_for_shader = enemy.current_size;
+            effect_params_z = 1.0; 
+            effect_params_w = 1.0;
+            // Movement and rotation for alive
+            enemy.rotation += enemy.angular_vel * dt;
+            enemy.wander_timer -= dt;
+            if enemy.wander_timer <= 0.0 {
+                new_wander_angle := rand.float32() * m.TAU;
+                enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
+                enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+            }
+            direction_to_player_strict := player_pos - enemy.pos;
+            final_direction := direction_to_player_strict;
+            dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict);
+            if dist_sq_to_player > 0.001 {
+                normalized_strict_direction := m.norm_vec2(direction_to_player_strict);
+                final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+            }
+            if dist_sq_to_player > 0.00001 {
+                normalized_final_direction := m.norm_vec2(final_direction);
+                enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED;
+            } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
+                enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED;
+            } else { enemy.vel = m.vec2_zero(); }
+            enemy.pos += enemy.vel * dt;
         }
-        enemy.rotation += enemy.angular_vel * dt;
-        if enemy.rotation > m.TAU { enemy.rotation -= m.TAU }
-        if enemy.rotation < 0    { enemy.rotation += m.TAU }        
-        enemy.wander_timer -= dt
-        if enemy.wander_timer <= 0.0 {
-            new_wander_angle := rand.float32() * m.TAU
-            enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle)
-            enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2) 
-        }
-        direction_to_player_strict := player_pos - enemy.pos
-        final_direction := direction_to_player_strict 
-        dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict)
-        if dist_sq_to_player > 0.001 { 
-            normalized_strict_direction := m.norm_vec2(direction_to_player_strict)
-            final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE)
-        } 
-        if dist_sq_to_player > 0.00001 { 
-            normalized_final_direction := m.norm_vec2(final_direction)
-            enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED
-        } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
-            enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED
-        } else { enemy.vel = m.vec2_zero() }
-        enemy.pos += enemy.vel * dt 
+
+        if enemy.rotation > m.TAU { enemy.rotation -= m.TAU; }
+        if enemy.rotation < 0    { enemy.rotation += m.TAU; }
+
         if live_enemy_count < MAX_ENEMIES {
-            inst := &state.enemy_instance_data[live_enemy_count]
-            inst.instance_pos = enemy.pos; inst.instance_size = enemy.current_size;
-            inst.instance_rotation = enemy.rotation; inst.instance_color = enemy.color; 
-            live_enemy_count += 1
+            inst := &state.enemy_instance_data[live_enemy_count];
+            inst.instance_pos = enemy.pos;
+            inst.instance_main_rotation = enemy.rotation;
+            inst.instance_visual_scale = current_visual_scale_for_shader;
+            inst.instance_color = enemy.color;
+            inst.instance_effect_params = {effect_params_x, effect_params_y, effect_params_z, effect_params_w};
+            live_enemy_count += 1;
         }
     }
     return live_enemy_count
