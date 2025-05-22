@@ -21,6 +21,9 @@ layout(binding=0) uniform bg_fs_params {
 };
 out vec4 frag_color;
 
+const float NEBULA_PARALLAX_FACTOR = 0.3; 
+const float STARS_PARALLAX_FACTOR = 0.7;  
+
 // --- Utility / Noise Functions (Defined INSIDE fs_bg now) ---
 vec3 hash31(float p) { vec3 p3=fract(vec3(p*0.1031,p*0.11369,p*0.13789)); p3+=dot(p3,p3.yzx+19.19); return fract((p3.xxy+p3.yzz)*p3.zyx); }
 vec2 hash21(float p) { vec2 p2=fract(vec2(p*0.1031,p*0.11369)); p2+=dot(p2,p2.yx+19.19); return fract((p2.xx+p2.yy)*p2.yx); }
@@ -41,25 +44,34 @@ float calculate_star_mask(vec2 uv_star, float star_radius, float aa_width) { // 
     return max_star_shape;
 }
 
-void main() { // fs_bg main
+void main() {
     if (bg_option == 0) {
-        vec2 xy = fract((gl_FragCoord.xy-vec2(tick)) / 50.0);
+        vec2 xy = fract((gl_FragCoord.xy / 50.0) - vec2(tick / 50.0));
         frag_color = vec4(vec3(xy.x*xy.y), 1.0);
     } else {
         vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
-        float time = tick;
-        vec2 nebula_p = uv_aspect * 0.8 + vec2(time * 0.008, time * 0.003);
+        float time = tick; 
+
+        vec2 nebula_time_drift = vec2(time * 0.8, time * 0.3);          
+        vec2 nebula_base_uv = uv_aspect + nebula_time_drift; 
+        vec2 nebula_p = nebula_base_uv * 0.8;                                  
+        
         float noise_val = fbm(nebula_p, 5, 0.5, 2.1);
         vec3 deep_space_color=vec3(0.01,0.0,0.03); vec3 nc1=vec3(0.5,0.05,0.25);
         vec3 nc2=vec3(0.1,0.15,0.5); vec3 nhl=vec3(0.8,0.7,0.75);
         vec3 nb=mix(deep_space_color,nc1,smoothstep(0.1,0.5,noise_val));
         vec3 nm=mix(nb,nc2,smoothstep(0.35,0.65,noise_val));
         vec3 fnc=mix(nm,nhl,smoothstep(0.6,0.8,noise_val));
-        vec2 star_uv = uv_aspect * 40.0 + time * 0.05;
+
+        vec2 stars_time_drift = vec2(time * 0.2, time * 0.1); 
+        vec2 star_uv_base_for_sampling = uv_aspect + stars_time_drift; 
+        vec2 star_uv = star_uv_base_for_sampling * 40.0;                             
+
         float density_thresh = 0.80; float bright_power = 15.0;
         float star_rad = 0.03; float star_aa = 0.06;
         float min_twinkle_bright = 0.6; float overall_star_brightness_multiplier = 1.8;
         float color_shift_speed = 0.2;
+
         float star_mask = calculate_star_mask(star_uv, star_rad, star_aa);
         vec3 star_light = vec3(0.0);
         if (star_mask > 0.001) {
@@ -91,7 +103,8 @@ void main() { // fs_bg main
 
 
 @vs vs_player
-layout(binding=0) uniform Player_Vs_Params { mat4 mvp; }; // Compact uniform block definition
+// ... (vs_player remains the same) ...
+layout(binding=0) uniform Player_Vs_Params { mat4 mvp; }; 
 in vec2 position;
 out vec2 v_uv;
 void main() {
@@ -101,7 +114,8 @@ void main() {
 @end
 
 @fs fs_player
-layout(binding=1) uniform Player_Fs_Params { float tick; vec2 resolution; }; // Compact
+// ... (fs_player remains the same) ...
+layout(binding=1) uniform Player_Fs_Params { float tick; vec2 resolution; }; 
 in vec2 v_uv;
 out vec4 frag_color;
 float sdCircle(vec2 p, float r) { return length(p) - r; }
@@ -140,199 +154,243 @@ void main() {
 @program player vs_player fs_player
 
 
-// --- Particle Shaders (Copied from newer code) ---
-
+// --- Particle Shaders ---
 @vs vs_particle
-layout(binding=0) uniform particle_vs_params { mat4 view_proj; }; // Compact
-
-// Per-vertex attributes for the base quad (drawn MAX_PARTICLES times)
-layout(location=0) in vec2 quad_pos; // -0.5 to 0.5
-layout(location=1) in vec2 quad_uv;  // 0.0 to 1.0
-
-// Per-instance attributes (one set per active particle)
-layout(location=2) in vec4 instance_pos_size_rot; // .xy=pos, .z=size, .w=rotation
-layout(location=3) in vec4 instance_color;        // .rgba color (alpha includes lifetime)
-
-// Outputs to fragment shader
+// ... (vs_particle remains the same) ...
+layout(binding=0) uniform particle_vs_params { mat4 view_proj; }; 
+layout(location=0) in vec2 quad_pos; 
+layout(location=1) in vec2 quad_uv;  
+layout(location=2) in vec4 instance_pos_size_rot; 
+layout(location=3) in vec4 instance_color;        
 out vec4 particle_color;
 out vec2 particle_uv;
-out float particle_dist; // Distance from center of quad (0.0 to ~0.7)
-
+out float particle_dist; 
 void main() {
     vec2 inst_pos = instance_pos_size_rot.xy;
     float inst_size = instance_pos_size_rot.z;
     float inst_rot = instance_pos_size_rot.w;
-
-    // Apply instance rotation and scale to base quad vertex position
     float cr = cos(inst_rot); float sr = sin(inst_rot);
     mat2 rot_mat = mat2(cr, -sr, sr, cr);
     vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
-
-    // Add instance world position
     vec2 final_world_pos = final_local_pos + inst_pos;
-
-    // Project to screen
     gl_Position  = view_proj * vec4(final_world_pos, 0.0, 1.0);
-
-    // Pass through data to fragment shader
-    particle_color = instance_color; // Pass color (including lifetime alpha)
+    particle_color = instance_color; 
     particle_uv = quad_uv;
-    particle_dist = length(quad_pos); // Precalculate distance from center
+    particle_dist = length(quad_pos); 
 }
 @end
 
-// File: shader.glsl (fs_particle part) - Angular Swirl + Black Core + Lifetime Alpha Only
 @fs fs_particle
+// ... (fs_particle remains the same) ...
 layout(binding=1) uniform particle_fs_params { float tick; };
-
 in vec4 particle_color;
 in vec2 particle_uv;
-in float particle_dist; // Keep this input if your VS still provides it
-
+in float particle_dist; 
 out vec4 frag_color;
-
 void main() {
     vec2 uv_centered = particle_uv - vec2(0.5);
     float angle = atan(uv_centered.y, uv_centered.x);
-    // Use either passed-in particle_dist or recalculate locally
-    float dist_from_center = particle_dist; // Or length(uv_centered) * (0.707/0.5) approx.
-
+    float dist_from_center = particle_dist; 
     float core_radius = 0.1;
     float swirl_start_radius = 0.15;
     float swirl_speed = -4.5;
     float swirl_freq = 6.0;
-    float radial_speed_factor = 2.0; // Add this back in for more dynamic swirl
-
+    float radial_speed_factor = 2.0; 
     vec3 color_dark_purple = vec3(0.3, 0.0, 0.5);
     vec3 color_bright_purple = vec3(0.8, 0.3, 1.0);
     vec3 color_black = vec3(0.0, 0.0, 0.0);
-
-    // Swirl Calculation (with distance component)
     float swirl_value = sin(angle * swirl_freq + dist_from_center * radial_speed_factor + tick * swirl_speed);
     swirl_value = swirl_value * 0.5 + 0.5;
     swirl_value = smoothstep(0.4, 0.6, swirl_value);
-
     vec3 swirl_color = mix(color_dark_purple, color_bright_purple, swirl_value);
-
     float core_mix_factor = smoothstep(core_radius, swirl_start_radius, dist_from_center);
     vec3 final_rgb = mix(color_black, swirl_color, core_mix_factor);
-
-    float final_alpha = particle_color.a; // Alpha purely from lifetime
-
+    float final_alpha = particle_color.a; 
     frag_color = vec4(final_rgb, final_alpha);
 }
 @end
 @program particle vs_particle fs_particle
 
-// --- Enemy Shaders ---
-@vs vs_enemy
-layout(binding=0) uniform enemy_vs_params { mat4 view_proj; };
 
-// Per-vertex attributes for the base quad
-layout(location=0) in vec2 quad_pos; // -0.5 to 0.5 (Same as particles for reuse)
-layout(location=1) in vec2 quad_uv;  // 0.0 to 1.0 (Same as particles for reuse)
-
-// Per-instance attributes for enemies
-layout(location=2) in vec4 instance_pos_size_rot; // .xy=pos, .z=size, .w=rotation (rotation for future use)
-layout(location=3) in vec4 instance_color_in;     // .rgba color for the enemy instance
-
-// Outputs to fragment shader
-out vec4 enemy_color_out;
-out vec2 enemy_uv_out;
-//out float enemy_dist_out; // Distance from center of quad
-
+// --- Blackhole Projectile Shaders ---
+@vs vs_blackhole
+// ... (vs_blackhole remains the same) ...
+layout(binding=0) uniform blackhole_vs_params { mat4 view_proj; };
+layout(location=0) in vec2 quad_pos; 
+layout(location=1) in vec2 quad_uv;  
+layout(location=2) in vec4 instance_pos_size_rot; 
+layout(location=3) in vec4 instance_color;        
+out vec4 bh_color_out;
+out vec2 bh_uv_out;
 void main() {
     vec2 inst_pos = instance_pos_size_rot.xy;
     float inst_size = instance_pos_size_rot.z;
-    float inst_rot = instance_pos_size_rot.w; // Rotation not used visually yet, but passed
+    float inst_rot = instance_pos_size_rot.w;
+    float cr = cos(inst_rot); float sr = sin(inst_rot);
+    mat2 rot_mat = mat2(cr, -sr, sr, cr);
+    vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
+    vec2 final_world_pos = final_local_pos + inst_pos;
+    gl_Position  = view_proj * vec4(final_world_pos, 0.0, 1.0);
+    bh_color_out = instance_color; 
+    bh_uv_out = quad_uv;
+}
+@end
 
-    // Apply instance rotation and scale to base quad vertex position
+@fs fs_blackhole
+layout(binding=1) uniform blackhole_fs_params { float tick; };
+
+in vec4 bh_color_out; // .a is life_ratio
+in vec2 bh_uv_out;
+
+out vec4 frag_color;
+
+void main() {
+    vec2 uv_centered = bh_uv_out - vec2(0.5); 
+
+    // --- Main Body Shape ---
+    float body_uv_half_width = 0.15; 
+    float body_uv_half_length = 0.40; // Slightly shorter than before to make tail more distinct
+    float body_ref_radius = 1.0;
+    vec2 body_oval_scale = vec2(body_ref_radius / body_uv_half_width, body_ref_radius / body_uv_half_length);
+    float dist_for_body_mask = length(uv_centered * body_oval_scale);
+    float body_aa = 0.1; 
+    float body_shape_alpha = 1.0 - smoothstep(body_ref_radius - body_aa, body_ref_radius + body_aa, dist_for_body_mask);
+
+    if (body_shape_alpha < 0.01 && bh_color_out.a < 0.01) { // Discard if fully transparent from shape and lifetime
+        discard;
+    }
+
+    // --- Swirl Calculation (for body color) ---
+    float dist_from_center_for_swirl = length(uv_centered); // Swirl based on circular distance
+    float angle = atan(uv_centered.y, uv_centered.x);
+    float swirl_speed = -7.0; // Slightly faster swirl       
+    float swirl_angular_freq = 8.0;  
+    float swirl_radial_freq = 5.0;   
+    float swirl_time_offset_factor = 0.25; 
+    float swirl_value = sin(
+        dist_from_center_for_swirl * swirl_radial_freq * (1.0 + 0.5 * sin(tick * swirl_time_offset_factor)) + 
+        tick * swirl_speed
+    );
+    swirl_value = swirl_value * 0.5 + 0.5; 
+    swirl_value = smoothstep(0.3, 0.7, swirl_value); // Adjusted smoothstep for potentially more contrast
+
+    vec3 color_core_black = vec3(0.0, 0.0, 0.0);
+    vec3 color_swirl_dark = vec3(0.1, 0.0, 0.2); // Slightly darker base swirl
+    vec3 color_swirl_bright = vec3(0.7, 0.3, 0.9); // Brighter swirl highlight
+
+    vec3 body_swirl_color = mix(color_swirl_dark, color_swirl_bright, swirl_value);
+    float core_radius_effect = 0.18; // Slightly smaller core for more swirl visibility
+    float core_influence = 1.0 - smoothstep(0.0, core_radius_effect, dist_from_center_for_swirl);
+    vec3 body_base_rgb = mix(body_swirl_color, color_core_black, core_influence);
+
+    // --- Glow and Tail Calculation ---
+    vec3 glow_color = vec3(1.0, 0.7, 1.0) * 5.8; // Very bright, slightly pinkish-purple glow, boosted
+
+    // Glow shape: wider and significantly longer than the body, especially at the tail
+    float glow_uv_half_width = body_uv_half_width * 1.8; // Glow is wider
+    float glow_uv_base_half_length = body_uv_half_length * 1.5; // Base length for the glow head
+
+    // Tailing effect: elongate the glow towards the rear (negative uv_centered.y)
+    // -uv_centered.y: positive at rear, negative at front. Ranges from 0.5 to -0.5.
+    // tail_elongation_factor: 1.0 (no elongation) at front, up to ~2.5-3.0 at rear.
+    float tail_elongation_factor = 1.0 + max(0.0, -uv_centered.y * 3.0); // Increase multiplier for longer tail
+    float dynamic_glow_uv_half_length = glow_uv_base_half_length * tail_elongation_factor;
+
+    vec2 glow_oval_scale = vec2(body_ref_radius / glow_uv_half_width, body_ref_radius / dynamic_glow_uv_half_length);
+    float dist_for_glow_mask = length(uv_centered * glow_oval_scale);
+    
+    float glow_aa = 0.15; // Softer antialiasing for glow
+    float glow_shape_alpha = 1.0 - smoothstep(body_ref_radius - glow_aa, body_ref_radius + glow_aa, dist_for_glow_mask);
+
+    // Modulate glow intensity: strongest at the "core" of the glow area and along the tail's spine
+    float glow_intensity_bias = (1.0 - smoothstep(0.0, 0.4, abs(uv_centered.x))); // Stronger along Y-axis spine
+    glow_intensity_bias *= (0.5 + 0.5 * smoothstep(-0.5, 0.5, -uv_centered.y)); // Stronger towards rear
+
+    float effective_glow_strength = glow_shape_alpha * glow_intensity_bias * 0.8; // Base strength for glow
+
+    // --- Combine Colors and Alpha ---
+    float lifetime_alpha = bh_color_out.a; 
+    float base_projectile_opacity = 0.80; // Overall opacity for the effect
+
+    // Add glow to body color
+    vec3 final_rgb = body_base_rgb + glow_color * effective_glow_strength;
+    
+    // Final alpha is the max of body or glow shape, then modulated by lifetime & base opacity
+    float combined_shape_alpha = max(body_shape_alpha, effective_glow_strength);
+    float overall_alpha = combined_shape_alpha * lifetime_alpha * base_projectile_opacity;
+
+    frag_color = vec4(clamp(final_rgb, 0.0, 2.5), clamp(overall_alpha, 0.0, 1.0)); // Allow even brighter for bloom
+}
+@end
+@program blackhole vs_blackhole fs_blackhole
+
+
+// --- Enemy Shaders ---
+@vs vs_enemy
+// ... (vs_enemy remains the same) ...
+layout(binding=0) uniform enemy_vs_params { mat4 view_proj; };
+layout(location=0) in vec2 quad_pos; 
+layout(location=1) in vec2 quad_uv;  
+layout(location=2) in vec4 instance_pos_size_rot; 
+layout(location=3) in vec4 instance_color_in;     
+out vec4 enemy_color_out;
+out vec2 enemy_uv_out;
+void main() {
+    vec2 inst_pos = instance_pos_size_rot.xy;
+    float inst_size = instance_pos_size_rot.z;
+    float inst_rot = instance_pos_size_rot.w; 
     float cr = cos(inst_rot);
     float sr = sin(inst_rot);
     mat2 rot_mat = mat2(cr, -sr, sr, cr);
     vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
-
-    // Add instance world position
     vec2 final_world_pos = final_local_pos + inst_pos;
-
-    // Project to screen
     gl_Position = view_proj * vec4(final_world_pos, 0.0, 1.0);
-
-    // Pass through data to fragment shader
     enemy_color_out = instance_color_in;
     enemy_uv_out = quad_uv;
-    //enemy_dist_out = length(quad_pos); // Precalculate distance from center (0.0 to ~0.7)
 }
 @end
 
 @fs fs_enemy
+// ... (fs_enemy remains the same) ...
 layout(binding=1) uniform enemy_fs_params { float tick; };
-
-in vec4 enemy_color_out; // Base color and alpha from Odin instance data
-in vec2 enemy_uv_out;    // Quad UVs (0.0 to 1.0)
-// enemy_dist_out is not used in this new approach
-
+in vec4 enemy_color_out; 
+in vec2 enemy_uv_out;    
 out vec4 frag_color;
-
-// Helper to rotate 2D vectors
 mat2 rotate2d(float angle) {
     float s = sin(angle);
     float c = cos(angle);
-    return mat2(c, -s, s, c); // Column-major matrix for standard multiplication: M * v
+    return mat2(c, -s, s, c); 
 }
-
-// SDF for an axis-aligned square given centered UVs (-0.5 to 0.5 range)
-// Returns distance; negative inside, positive outside.
-float sdf_rectangle(vec2 p, vec2 half_dims) { // Changed parameter
-    vec2 d = abs(p) - half_dims; // Use half_dims
+float sdf_rectangle(vec2 p, vec2 half_dims) { 
+    vec2 d = abs(p) - half_dims; 
     return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
 }
-
 void main() {
     vec2 uv_centered = enemy_uv_out - vec2(0.5);
-
-    vec2 rectangle_half_dims = vec2(0.32, 0.12); // Keep these or adjust for oblong shape
-    
+    vec2 rectangle_half_dims = vec2(0.32, 0.12); 
     float aa = 0.025;
     float pi = 3.14159265358979323846;
-
-    // MODIFIED: Define a common internal yaw speed
-    float internal_yaw_speed = 1.2; // Adjust this value for faster/slower internal yaw.
-                                    // This is a multiplier for tick.
-
-    // --- Diamond 1 ---
-    // MODIFIED: Use common speed, positive direction
+    float internal_yaw_speed = 1.2; 
     float internal_rotation1 = (pi / 4.0) + tick * internal_yaw_speed; 
     vec2 uv1_rotated = rotate2d(internal_rotation1) * uv_centered; 
     float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims);
-    
     vec3 color1_tip = enemy_color_out.rgb * 1.6 + vec3(0.3, 0.2, 0.3); 
     vec3 gradient_color1 = mix(color1_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv1_rotated.y * 1.5)); 
     float alpha_sdf1 = smoothstep(aa, 0.0, dist1); 
-
-    // --- Diamond 2 ---
-    // MODIFIED: Use common speed, negative direction
     float internal_rotation2 = (-pi / 4.0) - tick * internal_yaw_speed; 
     vec2 uv2_rotated = rotate2d(internal_rotation2) * uv_centered;
     float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims);
-
     vec3 color2_tip = enemy_color_out.rgb * 0.7 - vec3(0.1, 0.0, 0.1); 
     vec3 gradient_color2 = mix(color2_tip, enemy_color_out.rgb, smoothstep(-0.5, 0.5, uv2_rotated.x * 1.5));
     float alpha_sdf2 = smoothstep(aa, 0.0, dist2); 
-
-    // ... (blending code remains the same) ...
     vec4 frag1 = vec4(gradient_color1, alpha_sdf1 * enemy_color_out.a);
     vec4 frag2 = vec4(gradient_color2, alpha_sdf2 * enemy_color_out.a);
-
     vec3 blended_rgb = frag2.rgb * frag2.a + frag1.rgb * (1.0 - frag2.a);
     float blended_alpha = frag2.a + frag1.a * (1.0 - frag2.a);
-    
     frag_color = vec4(blended_rgb, blended_alpha);
-
     if (frag_color.a < 0.01) {
         discard;
     }
 }
 @end
-
 @program enemy vs_enemy fs_enemy

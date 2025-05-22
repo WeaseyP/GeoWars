@@ -1,6 +1,7 @@
 #version 450
 #define SOKOL_HLSL (1)
-layout(binding=0) uniform Player_Vs_Params { mat4 mvp; };                                    
+                                       
+layout(binding=0) uniform Player_Vs_Params { mat4 mvp; }; 
 in vec2 position;
 out vec2 v_uv;
 void main() {

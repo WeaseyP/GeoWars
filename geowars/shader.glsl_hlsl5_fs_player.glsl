@@ -1,6 +1,7 @@
 #version 450
 #define SOKOL_HLSL (1)
-layout(binding=1) uniform Player_Fs_Params { float tick; vec2 resolution; };           
+                                       
+layout(binding=1) uniform Player_Fs_Params { float tick; vec2 resolution; }; 
 in vec2 v_uv;
 out vec4 frag_color;
 float sdCircle(vec2 p, float r) { return length(p) - r; }
