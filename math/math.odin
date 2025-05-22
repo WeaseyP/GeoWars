@@ -98,7 +98,7 @@ lerp :: proc "contextless" (a, b: $T, t: $E) -> (x: T) {
     // Ensure T supports multiplication with (1-t) and t, and addition.
     // Ensure E can be subtracted from 1.
     // For f32, this works perfectly.
-    return f32(a)*(1-t) + b*t;
+    return a*(1-t) + f32(b)*t;
 }
 
 lookat :: proc {

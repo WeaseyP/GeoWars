@@ -28,7 +28,7 @@ PLAYER_ACCELERATION      :: 15.0
 PLAYER_REVERSE_FACTOR    :: 0.5
 PLAYER_DAMPING           :: 2.5
 PLAYER_MAX_SPEED         :: 7.0
-PLAYER_SCALE             :: 0.1
+PLAYER_SCALE             :: 0.15
 PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
 PLAYER_CORE_SHADER_RADIUS :: 0.04
 PLAYER_UV_SPACE_EXTENT   :: 0.5
@@ -95,7 +95,7 @@ LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5
 LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
 LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
 LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
-LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.75
+LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
 
 // RMB Enemy Death Particle Constants
 RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
@@ -623,7 +623,7 @@ check_RMB_particle_enemy_collisions :: proc() {
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
             if !enemy.active { continue } // Check if enemy is active
-            // Add this check: if enemy.is_dying { continue; } // Skip if already dying
+            if enemy.is_dying { continue; } // Skip if already dying
             
             enemy_radius := enemy.current_size * 0.5
             if enemy_radius <= 0.001 { continue }
@@ -664,7 +664,7 @@ check_LMB_projectile_enemy_collisions :: proc() {
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
             if !enemy.active { continue } // Check if enemy is active
-            // Add this check: if enemy.is_dying { continue; } // Skip if already dying
+            if enemy.is_dying { continue; } // Skip if already dying
 
             enemy_radius := enemy.current_size * 0.5
             dist_sq := m.len_sq_vec2(proj.pos - enemy.pos)
@@ -860,13 +860,12 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         current_visual_scale_for_shader: f32
         effect_params_x: f32 = 0.0; // is_dying
         effect_params_y: f32 = 0.0; // death_rect_offset
-        effect_params_z: f32 = 1.0; // current_dying_part_scale_multiplier (default to 1.0)
-        //effect_params_z = m.lerp(f32(1.0), ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale); // This will now correctly lerp from 1.0 to 0.0
+        effect_params_z: f32 = 1.0; // current_part_scale_multiplier (default to 1.0 relative to its quad)
         effect_params_w: f32 = 1.0; // overall_dying_alpha_multiplier (default to 1.0)
 
 
         if enemy.is_dying {
-            effect_params_x = 1.0; // Signal to shader that it's dying
+            effect_params_x = 1.0; 
 
             enemy.dying_timer -= dt;
             enemy.death_rect_offset += ENEMY_DEATH_RECT_SEPARATION_SPEED * dt;
@@ -877,24 +876,30 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 continue;
             }
 
-            // Progress from 0.0 (start of death) to 1.0 (end of death timer)
             progress_raw := 1.0 - math.clamp(enemy.dying_timer / ENEMY_DEATH_ANIM_DURATION, 0.0, 1.0);
             eased_progress_for_scale := math.pow(progress_raw, 2.5); // For slower shrink at start
 
-            // Scale multiplier for the individual rectangle parts
-            effect_params_z = m.lerp(f32(1.0), ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale);
+            // --- MODIFIED LOGIC FOR PART SCALE (effect_params_z) ---
+            // At the start of death (progress_raw = 0), parts should appear as they were (full size).
+            // On the enlarged death quad, their UVs need to be scaled down initially to compensate for the larger quad.
+            // Initial scale of parts relative to the enlarged quad's UVs:
+            initial_part_uv_scale : f32 = 1.0 / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER; 
+            // Final scale of parts relative to the enlarged quad's UVs:
+            // (If final world scale is 0, then final UV scale on the enlarged quad is also 0)
+            final_part_uv_scale : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
+            // If ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR is 0, then final_part_uv_scale is 0.
 
-            // Alpha multiplier - fade out linearly from 1.0 to 0.0 over the duration
-            // You can apply easing here too if desired, e.g., math.pow(progress_raw, N) for fade speed
-            effect_params_w = 1.0 - progress_raw;
+            effect_params_z = m.lerp(initial_part_uv_scale, final_part_uv_scale, eased_progress_for_scale);
+            // --- END MODIFICATION ---
 
+            effect_params_w = 1.0 - progress_raw; // Alpha multiplier
 
-            // The quad itself remains at the original target size during death
-            current_visual_scale_for_shader = enemy.target_size  * ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
+            // The quad itself is rendered larger during death
+            current_visual_scale_for_shader = enemy.target_size * ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
             
-            // enemy.current_size can still represent the conceptual "bounding" size if needed elsewhere,
-            // but it's not directly driving the quad's render scale during death.
-            enemy.current_size = enemy.target_size * effect_params_z;
+            // Conceptual enemy size (for collision or other logic, though dying enemies are skipped in collision)
+            // This reflects the actual visual shrinkage of the parts in world terms.
+            enemy.current_size = m.lerp(enemy.target_size, enemy.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale);
 
 
         } else if enemy.is_growing {
@@ -905,13 +910,16 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 enemy.grow_timer = 0.0;
             } else {
                 progress := 1.0 - (enemy.grow_timer / ENEMY_GROW_DURATION);
-                progress = math.clamp(progress, 0.0, 1.0);
+                progress = math.clamp(progress, 0.0, 1.0); // Use simple linear progress for grow
                 initial_actual_size := enemy.target_size * ENEMY_INITIAL_SCALE_FACTOR;
                 enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress);
             }
-            current_visual_scale_for_shader = enemy.current_size;
-            // Movement and rotation for growing
+            current_visual_scale_for_shader = enemy.current_size; // Quad scales with current_size
+            effect_params_z = 1.0; // Parts are full scale relative to the (growing) quad
+            effect_params_w = 1.0; 
+            
             enemy.rotation += enemy.angular_vel * dt;
+            // ... (rest of growing movement logic) ...
             enemy.wander_timer -= dt;
             if enemy.wander_timer <= 0.0 {
                 new_wander_angle := rand.float32() * m.TAU;
@@ -933,14 +941,16 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             } else { enemy.vel = m.vec2_zero(); }
             enemy.pos += enemy.vel * dt;
 
+
         } else { // Alive and not growing (normal behavior)
             enemy.current_size = enemy.target_size;
-            current_visual_scale_for_shader = enemy.current_size;
-            effect_params_z = 1.0; 
-            effect_params_w = 1.0;
-            // Movement and rotation for alive
+            current_visual_scale_for_shader = enemy.current_size; // Quad is target_size
+            effect_params_z = 1.0; // Parts are full scale relative to the quad
+            effect_params_w = 1.0; 
+            
             enemy.rotation += enemy.angular_vel * dt;
-            enemy.wander_timer -= dt;
+            // ... (rest of alive movement logic) ...
+             enemy.wander_timer -= dt;
             if enemy.wander_timer <= 0.0 {
                 new_wander_angle := rand.float32() * m.TAU;
                 enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
@@ -962,6 +972,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             enemy.pos += enemy.vel * dt;
         }
 
+        // Common rotation and instancing
         if enemy.rotation > m.TAU { enemy.rotation -= m.TAU; }
         if enemy.rotation < 0    { enemy.rotation += m.TAU; }
 
