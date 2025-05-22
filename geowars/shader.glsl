@@ -1,4 +1,4 @@
-// File: shader.glsl (Merged Version)
+// File: shader.glsl (Merged Version, with Player Health Display)
 //------------------------------------------------------------------------------
 @header package main
 @header import sg "../sokol/gfx"
@@ -7,6 +7,7 @@
 @ctype vec2 m.vec2
 @ctype vec4 m.vec4 // Added for particle color instance data
 
+// --- Background Shaders (Keep existing from older version) ---
 
 @vs vs_bg
 in vec2 position; // Location 0
@@ -20,9 +21,6 @@ layout(binding=0) uniform bg_fs_params {
     int bg_option;
 };
 out vec4 frag_color;
-
-const float NEBULA_PARALLAX_FACTOR = 0.3; 
-const float STARS_PARALLAX_FACTOR = 0.7;  
 
 // --- Utility / Noise Functions (Defined INSIDE fs_bg now) ---
 vec3 hash31(float p) { vec3 p3=fract(vec3(p*0.1031,p*0.11369,p*0.13789)); p3+=dot(p3,p3.yzx+19.19); return fract((p3.xxy+p3.yzz)*p3.zyx); }
@@ -44,34 +42,25 @@ float calculate_star_mask(vec2 uv_star, float star_radius, float aa_width) { // 
     return max_star_shape;
 }
 
-void main() {
+void main() { // fs_bg main
     if (bg_option == 0) {
-        vec2 xy = fract((gl_FragCoord.xy / 50.0) - vec2(tick / 50.0));
+        vec2 xy = fract((gl_FragCoord.xy-vec2(tick)) / 50.0);
         frag_color = vec4(vec3(xy.x*xy.y), 1.0);
     } else {
         vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
-        float time = tick; 
-
-        vec2 nebula_time_drift = vec2(time * 0.8, time * 0.3);          
-        vec2 nebula_base_uv = uv_aspect + nebula_time_drift; 
-        vec2 nebula_p = nebula_base_uv * 0.8;                                  
-        
+        float time = tick;
+        vec2 nebula_p = uv_aspect * 0.8 + vec2(time * 0.008, time * 0.003);
         float noise_val = fbm(nebula_p, 5, 0.5, 2.1);
         vec3 deep_space_color=vec3(0.01,0.0,0.03); vec3 nc1=vec3(0.5,0.05,0.25);
         vec3 nc2=vec3(0.1,0.15,0.5); vec3 nhl=vec3(0.8,0.7,0.75);
         vec3 nb=mix(deep_space_color,nc1,smoothstep(0.1,0.5,noise_val));
         vec3 nm=mix(nb,nc2,smoothstep(0.35,0.65,noise_val));
         vec3 fnc=mix(nm,nhl,smoothstep(0.6,0.8,noise_val));
-
-        vec2 stars_time_drift = vec2(time * 0.2, time * 0.1); 
-        vec2 star_uv_base_for_sampling = uv_aspect + stars_time_drift; 
-        vec2 star_uv = star_uv_base_for_sampling * 40.0;                             
-
+        vec2 star_uv = uv_aspect * 40.0 + time * 0.05;
         float density_thresh = 0.80; float bright_power = 15.0;
         float star_rad = 0.03; float star_aa = 0.06;
         float min_twinkle_bright = 0.6; float overall_star_brightness_multiplier = 1.8;
         float color_shift_speed = 0.2;
-
         float star_mask = calculate_star_mask(star_uv, star_rad, star_aa);
         vec3 star_light = vec3(0.0);
         if (star_mask > 0.001) {
@@ -101,10 +90,10 @@ void main() {
 @end
 @program bg vs_bg fs_bg
 
+// --- Player Shaders (With Health Display) ---
 
 @vs vs_player
-// ... (vs_player remains the same) ...
-layout(binding=0) uniform Player_Vs_Params { mat4 mvp; }; 
+layout(binding=0) uniform Player_Vs_Params { mat4 mvp; };
 in vec2 position;
 out vec2 v_uv;
 void main() {
@@ -114,66 +103,142 @@ void main() {
 @end
 
 @fs fs_player
-// ... (fs_player remains the same) ...
-layout(binding=1) uniform Player_Fs_Params { float tick; vec2 resolution; }; 
+layout(binding=1) uniform Player_Fs_Params {
+    float tick;
+    vec2 resolution;
+    float player_hp_uniform;
+    float player_max_hp_uniform;
+};
 in vec2 v_uv;
 out vec4 frag_color;
+
 float sdCircle(vec2 p, float r) { return length(p) - r; }
 mat2 rotate2d(float angle) { float c=cos(angle); float s=sin(angle); return mat2(c,-s,s,c); }
+
 void main() {
     vec2 p_orig = v_uv - vec2(0.5);
-    float time = tick * 0.05; float color_time = tick * 0.5;
-    float base_angle = atan(p_orig.y, p_orig.x); float dist = length(p_orig);
+    float anim_time = tick * 0.05; // Original 'time' for component animations
+    float color_time = tick * 0.5;
+    float flicker_tick = tick; // Raw tick for consistent HP-based flickering
+
+    float hp = player_hp_uniform;
+    float max_hp = player_max_hp_uniform;
+
     vec3 color = vec3(0.0); float alpha = 0.0;
-    float core_rad = 0.04 + 0.005 * sin(time * 25.0);
+
+    // --- HP Based Modifiers ---
+    float core_mod = 1.0;
+    float ring1_mod = 1.0;
+    float ring2_mod = 1.0;
+    float glow_mod = 1.0;
+
+    if (max_hp > 0.0) { // Ensure max_hp is valid
+        float lost_hp = max_hp - hp;
+
+        if (hp <= 0.0) { // Death State
+            core_mod = 0.05 + 0.05 * sin(flicker_tick * 35.0); // Fast, dying pulse for core
+            ring1_mod = 0.0; // Ring 1 disappears
+            ring2_mod = 0.0; // Ring 2 disappears
+            glow_mod = 0.0;  // Glow/Spikes disappear
+        } else {
+            // Stage 1: Lost 1 HP (or more) -> Affect Glow/Spikes
+            if (lost_hp >= 0.9) { // Use 0.9 to surely catch "lost 1 HP" due to float
+                glow_mod = 0.7 + 0.15 * sin(flicker_tick * (8.0 + lost_hp * 1.5));
+            }
+
+            // Stage 2: Lost 2 HP (or more) -> Affect Ring 2 additionally
+            if (lost_hp >= 1.9) {
+                ring2_mod = 0.5 + 0.25 * sin(flicker_tick * (12.0 + lost_hp * 2.0) + 1.0);
+                glow_mod = 0.4 + 0.1 * sin(flicker_tick * (10.0 + lost_hp * 2.0)); // Glow further dimmed
+            }
+
+            // Stage 3: Lost 3 HP (or more) -> Affect Ring 1 additionally
+            // (e.g., if max_hp=4, HP=1 => lost_hp=3. if max_hp=3, this won't trigger unless HP=0, which is handled by death state)
+            if (lost_hp >= 2.9) {
+                ring1_mod = 0.3 + 0.25 * sin(flicker_tick * (15.0 + lost_hp * 2.5) + 2.0);
+                ring2_mod = 0.2 + 0.1 * sin(flicker_tick * (14.0 + lost_hp * 2.5) + 1.0); // Ring 2 very dim
+                glow_mod = 0.2 + 0.05 * sin(flicker_tick * (12.0 + lost_hp * 2.5));     // Glow barely there
+            }
+            
+            // Core pulsing if HP is 1 (and not dead)
+            if (hp <= 1.0 && hp > 0.01) { // Use 0.01 to avoid overlap with death state if hp is extremely small float
+                 core_mod = 0.65 + 0.35 * sin(flicker_tick * 10.0);
+            }
+        }
+    }
+
+    // --- Render Components with Modifiers ---
+
+    // Core
+    float core_rad = 0.04 + 0.005 * sin(anim_time * 25.0);
     float core_d = sdCircle(p_orig, core_rad);
     float core_aa = smoothstep(0.0, 0.005, -core_d);
-    color += vec3(0.5, 1.0, 1.0) * core_aa; alpha = max(alpha, core_aa);
-    float ring1_rot_angle = -time * 1.5; float ring1_squash = 0.3 + 0.7 * abs(cos(time * 1.5));
+    color += vec3(0.5, 1.0, 1.0) * core_aa * core_mod;
+    alpha = max(alpha, core_aa * core_mod);
+
+    // Ring 1 (Inner Magenta)
+    float ring1_rot_angle = -anim_time * 1.5; float ring1_squash = 0.3 + 0.7 * abs(cos(anim_time * 1.5));
     mat2 ring1_invRot = rotate2d(-ring1_rot_angle); mat2 ring1_invScale = mat2(1.0, 0.0, 0.0, 1.0 / ring1_squash);
     vec2 p1 = ring1_invScale * ring1_invRot * p_orig;
-    float ring1_rad = 0.1 + 0.01 * cos(time * 18.0); float ring1_d = abs(sdCircle(p1, ring1_rad)) - 0.015 * 0.5;
+    float ring1_rad = 0.1 + 0.01 * cos(anim_time * 18.0); float ring1_d = abs(sdCircle(p1, ring1_rad)) - 0.015 * 0.5;
     float ring1_aa = smoothstep(0.0, 0.004, -ring1_d);
-    color += vec3(1.0, 0.3, 0.9) * ring1_aa * 1.5; alpha = max(alpha, ring1_aa);
-    float ring2_rot_angle = time * 1.1; float ring2_squash = 0.4 + 0.6 * abs(sin(time * 1.1 + 0.5));
+    color += vec3(1.0, 0.3, 0.9) * ring1_aa * 1.5 * ring1_mod;
+    alpha = max(alpha, ring1_aa * ring1_mod);
+
+    // Ring 2 (Outer Cyan)
+    float ring2_rot_angle = anim_time * 1.1; float ring2_squash = 0.4 + 0.6 * abs(sin(anim_time * 1.1 + 0.5));
     mat2 ring2_invRot = rotate2d(-ring2_rot_angle); mat2 ring2_invScale = mat2(1.0, 0.0, 0.0, 1.0 / ring2_squash);
     vec2 p2 = ring2_invScale * ring2_invRot * p_orig;
-    float ring2_rad = 0.18 + 0.01 * sin(time * 12.0); float ring2_d = abs(sdCircle(p2, ring2_rad)) - 0.01 * 0.5;
+    float ring2_rad = 0.18 + 0.01 * sin(anim_time * 12.0); float ring2_d = abs(sdCircle(p2, ring2_rad)) - 0.01 * 0.5;
     float ring2_aa = smoothstep(0.0, 0.003, -ring2_d);
-    color += vec3(0.2, 0.9, 0.9) * ring2_aa; alpha = max(alpha, ring2_aa);
-    float spike_rotation_angle = time * 0.8; float rotated_angle = base_angle + spike_rotation_angle;
+    color += vec3(0.2, 0.9, 0.9) * ring2_aa * ring2_mod;
+    alpha = max(alpha, ring2_aa * ring2_mod);
+
+    // Glow & Spikes
+    float base_angle = atan(p_orig.y, p_orig.x); float dist = length(p_orig);
+    float spike_rotation_angle = anim_time * 0.8; float rotated_angle = base_angle + spike_rotation_angle;
     float spikes = pow(abs(sin(rotated_angle * 16.0 * 0.5)), 32.0);
     float glow_intensity = pow(max(0.0, 1.0 - dist / 0.5), 5.0);
     glow_intensity *= (0.7 + 5.0 * spikes);
-    glow_intensity *= (0.8 + 0.2 * sin(time * 15.0 + dist * 12.0));
+    glow_intensity *= (0.8 + 0.2 * sin(anim_time * 15.0 + dist * 12.0)); // Original animation for glow
+    glow_intensity *= glow_mod; // Apply HP based modifier
+
     vec3 dynamic_glow_col = normalize(vec3(0.5+0.5*sin(color_time+0.0), 0.5+0.5*sin(color_time+2.094395), 0.5+0.5*sin(color_time+4.18879))) * 1.1;
-    color += dynamic_glow_col * glow_intensity * 2.0; alpha = max(alpha, glow_intensity * 0.6);
+    color += dynamic_glow_col * glow_intensity * 2.0;
+    alpha = max(alpha, glow_intensity * 0.6);
+
     frag_color = vec4(clamp(color, 0.0, 1.0), clamp(alpha, 0.0, 1.0));
 }
 @end
 @program player vs_player fs_player
 
 
-// --- Particle Shaders ---
+// --- Particle Shaders (Copied from newer code) ---
+
 @vs vs_particle
-// ... (vs_particle remains the same) ...
-layout(binding=0) uniform particle_vs_params { mat4 view_proj; }; 
+layout(binding=0) uniform particle_vs_params { mat4 view_proj; };
+
 layout(location=0) in vec2 quad_pos; 
 layout(location=1) in vec2 quad_uv;  
+
 layout(location=2) in vec4 instance_pos_size_rot; 
 layout(location=3) in vec4 instance_color;        
+
 out vec4 particle_color;
 out vec2 particle_uv;
 out float particle_dist; 
+
 void main() {
     vec2 inst_pos = instance_pos_size_rot.xy;
     float inst_size = instance_pos_size_rot.z;
     float inst_rot = instance_pos_size_rot.w;
+
     float cr = cos(inst_rot); float sr = sin(inst_rot);
     mat2 rot_mat = mat2(cr, -sr, sr, cr);
     vec2 final_local_pos = rot_mat * (quad_pos * inst_size);
     vec2 final_world_pos = final_local_pos + inst_pos;
     gl_Position  = view_proj * vec4(final_world_pos, 0.0, 1.0);
+
     particle_color = instance_color; 
     particle_uv = quad_uv;
     particle_dist = length(quad_pos); 
@@ -181,31 +246,40 @@ void main() {
 @end
 
 @fs fs_particle
-// ... (fs_particle remains the same) ...
 layout(binding=1) uniform particle_fs_params { float tick; };
+
 in vec4 particle_color;
 in vec2 particle_uv;
 in float particle_dist; 
+
 out vec4 frag_color;
+
 void main() {
     vec2 uv_centered = particle_uv - vec2(0.5);
     float angle = atan(uv_centered.y, uv_centered.x);
     float dist_from_center = particle_dist; 
+
     float core_radius = 0.1;
     float swirl_start_radius = 0.15;
     float swirl_speed = -4.5;
     float swirl_freq = 6.0;
     float radial_speed_factor = 2.0; 
+
     vec3 color_dark_purple = vec3(0.3, 0.0, 0.5);
     vec3 color_bright_purple = vec3(0.8, 0.3, 1.0);
     vec3 color_black = vec3(0.0, 0.0, 0.0);
+
     float swirl_value = sin(angle * swirl_freq + dist_from_center * radial_speed_factor + tick * swirl_speed);
     swirl_value = swirl_value * 0.5 + 0.5;
     swirl_value = smoothstep(0.4, 0.6, swirl_value);
+
     vec3 swirl_color = mix(color_dark_purple, color_bright_purple, swirl_value);
+
     float core_mix_factor = smoothstep(core_radius, swirl_start_radius, dist_from_center);
     vec3 final_rgb = mix(color_black, swirl_color, core_mix_factor);
+
     float final_alpha = particle_color.a; 
+
     frag_color = vec4(final_rgb, final_alpha);
 }
 @end

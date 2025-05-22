@@ -7,9 +7,6 @@ layout(binding=0) uniform bg_fs_params {
 };
 out vec4 frag_color;
 
-const float NEBULA_PARALLAX_FACTOR = 0.3; 
-const float STARS_PARALLAX_FACTOR = 0.7;  
-
                                                                
 vec3 hash31(float p) { vec3 p3=fract(vec3(p*0.1031,p*0.11369,p*0.13789)); p3+=dot(p3,p3.yzx+19.19); return fract((p3.xxy+p3.yzz)*p3.zyx); }
 vec2 hash21(float p) { vec2 p2=fract(vec2(p*0.1031,p*0.11369)); p2+=dot(p2,p2.yx+19.19); return fract((p2.xx+p2.yy)*p2.yx); }
@@ -30,34 +27,25 @@ float calculate_star_mask(vec2 uv_star, float star_radius, float aa_width) {
     return max_star_shape;
 }
 
-void main() {
+void main() {              
     if (bg_option == 0) {
-        vec2 xy = fract((gl_FragCoord.xy / 50.0) - vec2(tick / 50.0));
+        vec2 xy = fract((gl_FragCoord.xy-vec2(tick)) / 50.0);
         frag_color = vec4(vec3(xy.x*xy.y), 1.0);
     } else {
         vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
-        float time = tick; 
-
-        vec2 nebula_time_drift = vec2(time * 0.8, time * 0.3);          
-        vec2 nebula_base_uv = uv_aspect + nebula_time_drift; 
-        vec2 nebula_p = nebula_base_uv * 0.8;                                  
-        
+        float time = tick;
+        vec2 nebula_p = uv_aspect * 0.8 + vec2(time * 0.008, time * 0.003);
         float noise_val = fbm(nebula_p, 5, 0.5, 2.1);
         vec3 deep_space_color=vec3(0.01,0.0,0.03); vec3 nc1=vec3(0.5,0.05,0.25);
         vec3 nc2=vec3(0.1,0.15,0.5); vec3 nhl=vec3(0.8,0.7,0.75);
         vec3 nb=mix(deep_space_color,nc1,smoothstep(0.1,0.5,noise_val));
         vec3 nm=mix(nb,nc2,smoothstep(0.35,0.65,noise_val));
         vec3 fnc=mix(nm,nhl,smoothstep(0.6,0.8,noise_val));
-
-        vec2 stars_time_drift = vec2(time * 0.2, time * 0.1); 
-        vec2 star_uv_base_for_sampling = uv_aspect + stars_time_drift; 
-        vec2 star_uv = star_uv_base_for_sampling * 40.0;                             
-
+        vec2 star_uv = uv_aspect * 40.0 + time * 0.05;
         float density_thresh = 0.80; float bright_power = 15.0;
         float star_rad = 0.03; float star_aa = 0.06;
         float min_twinkle_bright = 0.6; float overall_star_brightness_multiplier = 1.8;
         float color_shift_speed = 0.2;
-
         float star_mask = calculate_star_mask(star_uv, star_rad, star_aa);
         vec3 star_light = vec3(0.0);
         if (star_mask > 0.001) {

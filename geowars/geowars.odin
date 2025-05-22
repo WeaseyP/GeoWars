@@ -1,4 +1,4 @@
-// File: geowars.odin
+// File: geowars.odin (Revised for Grunt-Player Collision Damage)
 //------------------------------------------------------------------------------
 package main
 
@@ -34,6 +34,10 @@ PLAYER_CORE_SHADER_RADIUS :: 0.04
 PLAYER_UV_SPACE_EXTENT   :: 0.5
 PLAYER_CORE_WORLD_RADIUS :: (PLAYER_CORE_SHADER_RADIUS / PLAYER_UV_SPACE_EXTENT) * PLAYER_SCALE
 PLAYER_BOUNCE_DAMPING_FACTOR :: 1.05
+PLAYER_MAX_HP_VALUE      :: 4 // From previous implementation
+PLAYER_INVULNERABILITY_DURATION :: 0.75 // From previous implementation for particle hits
+PARTICLE_DAMAGE_VALUE    :: 1 // From previous (RMB particle damage)
+ENEMY_GRUNT_DAMAGE_VALUE :: 1 // <<< NEW: Damage grunt deals to player
 
 // Black Hole (RMB) Constants
 BLACKHOLE_COOLDOWN_DURATION :: 1.0 
@@ -47,6 +51,9 @@ SWIRL_PARTICLE_SIZE_BASE    : f32 : 0.03
 SWIRL_PARTICLE_SIZE_RAND    : f32 : 0.01
 SWIRL_CLOUD_TRAVEL_FACTOR   : f32 : 0.0  
 SWIRL_CLOUD_BASE_PUSH       : f32 : 0.15 
+
+
+// *** Explosion Constants (after swirl) ***
 EXPLOSION_LIFETIME_BASE : f32 : 1.0
 EXPLOSION_LIFETIME_RAND : f32 : 0.8
 EXPLOSION_SPEED_BASE    : f32 : 6.0  
@@ -54,9 +61,9 @@ EXPLOSION_SPEED_RAND    : f32 : 4.0
 EXPLOSION_PARTICLE_SPIN : f32 : 0.0  
 
 // Black Hole Projectile (LMB) Constants
-PROJECTILE_BLACKHOLE_COOLDOWN :: 0.25 // Slightly faster cooldown if desired
-PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 5.0 // << INCREASED SPEED
-PROJECTILE_BLACKHOLE_LIFETIME :: 3.0 // Slightly shorter lifetime if they move faster
+PROJECTILE_BLACKHOLE_COOLDOWN :: 0.25 
+PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 5.0 
+PROJECTILE_BLACKHOLE_LIFETIME :: 3.0 
 PROJECTILE_BLACKHOLE_SCALE :: 0.12
 PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY :: m.PI * 1.5
 
@@ -80,24 +87,22 @@ ENEMY_GRUNT_MAX_HP :: 2
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
-LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  // Slightly faster burst
+LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
 LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
-LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 // Slightly larger burst particles
+LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
 LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
-LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.5 // Slower spin than RMB particles
+LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.5 
 
 // RMB Enemy Death Particle Constants
-RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 // Smaller burst
+RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
 RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
 RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.2
-RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 // Smaller particles
+RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 
 RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
 RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
-RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} // Consistent with spawn_swirling_charge visual
-
-
+RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} 
 
 
 // Rendering Internals
@@ -162,7 +167,7 @@ Enemy :: struct {
     is_growing: bool,      
     rotation: f32,         
     angular_vel: f32,    
-    hp: i32, // <<< NEW: Enemy health
+    hp: i32, 
     active: bool,
     current_wander_vector: m.vec2,
     wander_timer: f32,
@@ -188,12 +193,16 @@ state: struct {
     blackhole_vs_params: Blackhole_Vs_Params, blackhole_fs_params: Blackhole_Fs_Params,
 
     player_pos: m.vec2, player_vel: m.vec2,
+    player_hp: int, player_max_hp: int, // Player health
+    player_invulnerable_timer: f32,    // Invulnerability timer
+    player_defeated_message_shown: bool, // To show defeat message only once
+
     key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool,
     
     rmb_down: bool, previous_rmb_down: bool, rmb_cooldown_timer: f32,
     lmb_down: bool, previous_lmb_down: bool, lmb_cooldown_timer: f32,
 
-    mouse_screen_pos: m.vec2, // <<< NEW: Store current mouse screen coordinates
+    mouse_screen_pos: m.vec2, 
 
 	particles: [MAX_PARTICLES]Particle, particle_instance_data: [MAX_PARTICLES]Particle_Instance_Data,
 	particle_quad_vbo: sg.Buffer, particle_instance_vbo: sg.Buffer, particle_bind: sg.Bindings,
@@ -276,6 +285,11 @@ init :: proc "c" () {
     state.next_blackhole_index = 0; state.num_active_blackholes = 0;
 
     state.player_pos = {0,0}; state.player_vel = {0,0};
+    state.player_max_hp = PLAYER_MAX_HP_VALUE;
+    state.player_hp = state.player_max_hp;
+    state.player_invulnerable_timer = 0.0;
+    state.player_defeated_message_shown = false;
+
     state.rmb_down=false; state.previous_rmb_down=false; state.rmb_cooldown_timer=0.0;
     state.lmb_down=false; state.previous_lmb_down=false; state.lmb_cooldown_timer=0.0;
     state.mouse_screen_pos = {0,0};
@@ -296,7 +310,7 @@ event :: proc "c" (event: ^sapp.Event) {
 	case .MOUSE_UP: 
         if event.mouse_button == .RIGHT { state.rmb_down = false }
         if event.mouse_button == .LEFT  { state.lmb_down = false }
-    case .MOUSE_MOVE: // <<< NEW: Capture mouse movement
+    case .MOUSE_MOVE: 
         state.mouse_screen_pos = {event.mouse_x, event.mouse_y}
     }
 }
@@ -311,6 +325,7 @@ emit_particle :: proc(part: Particle) {
 
 spawn_swirling_charge :: proc() { // RMB Ability
 	context = runtime.default_context()
+    if state.player_hp <= 0 { return; } 
     charge_spawn_center := state.player_pos 
 	charge_duration := SWIRL_CHARGE_DURATION_BASE + rand.float32() * SWIRL_CHARGE_DURATION_RAND 
     start_size_val_base := SWIRL_PARTICLE_SIZE_BASE
@@ -354,6 +369,23 @@ update_and_instance_particles :: proc(dt: f32) -> int {
         p.pos += p.vel * dt
 		p.rotation += p.angular_vel * dt
         p.life_remaining -= dt
+        
+        // Player collision with RMB explosion particles (already implemented in previous step)
+        // This was for particles hitting player, now we need enemies hitting player
+        // if !p.is_swirling_charge && p.active && state.player_hp > 0 && state.player_invulnerable_timer <= 0.0 {
+        //     dist_sq_to_player := m.dist_sq_vec2(state.player_pos, p.pos);
+        //     particle_hitbox_radius := p.size * 0.5; 
+        //     combined_radii := PLAYER_CORE_WORLD_RADIUS + particle_hitbox_radius;
+        //     if dist_sq_to_player < (combined_radii * combined_radii) {
+        //         state.player_hp -= PARTICLE_DAMAGE_VALUE; // Using generic particle damage for now
+        //         state.player_hp = math.max(state.player_hp, 0);
+        //         state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION;
+        //         p.active = false; 
+        //         fmt.printf("Player hit by RMB EXPLOSION particle! HP: %d/%d\n", state.player_hp, state.player_max_hp);
+        //         continue; 
+        //     }
+        // }
+
         if p.is_swirling_charge && p.life_remaining <= 0.0 {
             p.is_swirling_charge = false 
             new_life := EXPLOSION_LIFETIME_BASE + rand.float32() * EXPLOSION_LIFETIME_RAND
@@ -393,38 +425,22 @@ spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
 		life := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
 		size := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
 		angular_vel := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
-		
 		particle_color := base_color;
-		// Make particles a bit brighter and less saturated than the enemy's base color for a "burst" feel
 		particle_color.r = math.min(base_color.r * 1.2 + 0.2, 1.0);
 		particle_color.g = math.min(base_color.g * 1.2 + 0.2, 1.0);
 		particle_color.b = math.min(base_color.b * 1.2 + 0.2, 1.0);
-		particle_color.a = 0.85; // Start fairly opaque, will fade due to life_ratio
-
+		particle_color.a = 0.85; 
 		emit_particle(Particle{
-			pos              = pos,
-			vel              = dir * speed,
-			cloud_travel_vel = {0,0}, 
-			color            = particle_color,
-			size             = size,
-			start_size       = size,
-			life_remaining   = life,
-			life_max         = life,      
-			swirl_duration   = 0,      
-			rotation         = rand.float32() * m.TAU,
-			angular_vel      = angular_vel,
-			charge_center_pos= {0,0}, 
-			is_burst_particle= true, // Important: Marks it as a simple burst
-			is_swirling_charge= false, 
-			active           = false, // emit_particle will set this to true
+			pos=pos, vel=dir*speed, cloud_travel_vel={0,0}, color=particle_color, size=size, start_size=size,
+            life_remaining=life, life_max=life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, active=false, 
 		})
 	}
 }
 
 spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 	context = runtime.default_context()
-	base_death_color := RMB_PARTICLE_COLOR; // Use the RMB ability's color scheme
-
+	base_death_color := RMB_PARTICLE_COLOR; 
 	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
 		angle := rand.float32() * m.TAU
 		dir := m.angle_to_vec2(angle)
@@ -432,30 +448,15 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 		life := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
 		size := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
 		angular_vel := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
-		
-		// Particle color can be directly from RMB_PARTICLE_COLOR or slightly varied
 		particle_color := base_death_color;
 		particle_color.r = math.clamp(base_death_color.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
 		particle_color.g = math.clamp(base_death_color.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
 		particle_color.b = math.clamp(base_death_color.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
-		particle_color.a = rand.float32_range(0.6, 0.9); // Start fairly opaque
-
+		particle_color.a = rand.float32_range(0.6, 0.9); 
 		emit_particle(Particle{
-			pos              = pos,
-			vel              = dir * speed,
-			cloud_travel_vel = {0,0}, 
-			color            = particle_color,
-			size             = size,
-			start_size       = size,
-			life_remaining   = life,
-			life_max         = life,      
-			swirl_duration   = 0,      
-			rotation         = rand.float32() * m.TAU,
-			angular_vel      = angular_vel,
-			charge_center_pos= {0,0}, 
-			is_burst_particle= true, // Mark as a burst particle so it behaves like other death particles (fades out, etc.)
-			is_swirling_charge= false, 
-			active           = false, 
+			pos=pos, vel=dir*speed, cloud_travel_vel={0,0}, color=particle_color, size=size, start_size=size,
+            life_remaining=life, life_max=life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, active=false, 
 		})
 	}
 }
@@ -464,66 +465,26 @@ check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
         particle := &state.particles[i]
-
-        // --- MODIFIED CONDITION ---
-        // Check if particle is active AND is part of the RMB ability (either swirling or exploded).
-        // Exclude generic burst particles (e.g., from LMB enemy deaths or other future effects).
-        // A particle from RMB is either:
-        //    1. is_swirling_charge = true (initial phase)
-        //    2. is_swirling_charge = false AND is_burst_particle = false (explosion phase after swirl)
-        // We want to damage with both. So, we only skip if it's inactive OR it's a generic burst particle
-        // that isn't part of the RMB attack's lifecycle.
-        if !particle.active || (particle.is_burst_particle && !particle.is_swirling_charge) { 
-            // If it's a burst particle BUT NOT a swirling charge that just turned into an explosion,
-            // then it's likely a death particle from another source (like LMB kill), so skip.
-            // However, if is_burst_particle is true because an RMB particle just exploded,
-            // it would have had is_swirling_charge = false already.
-            // The simpler way for RMB damage is: if it's active and NOT a generic death burst, it can hit.
-            // For RMB, is_burst_particle is set to true for ITS death particles, but those don't damage.
-            // The damaging parts of RMB are when is_swirling_charge=true OR 
-            // (is_swirling_charge=false AND is_burst_particle=false for the explosion phase).
-            // The existing spawn_RMB_enemy_death_particles sets is_burst_particle = true.
-            // The spawn_swirling_charge sets is_swirling_charge = true.
-            // The update_and_instance_particles, when swirl ends, sets is_swirling_charge = false 
-            // and does NOT set is_burst_particle = true for the damaging explosion particles.
-
-            // Revised logic:
-            // Active particles that are either swirling OR are from the RMB explosion phase (not generic bursts)
-            if particle.is_burst_particle { // Generic death particles (from LMB kills or RMB kills) should not deal damage
-                continue
-            }
-            // Now, particle is either swirling_charge OR an RMB_explosion_particle
-            // Both should be able to deal damage.
+        if !particle.active || particle.is_burst_particle { 
+            continue
         }
-        // --- END MODIFIED CONDITION ---
-        
         particle_radius := particle.size * 0.5 
         if particle_radius <= 0.001 { continue }
-
-
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
-            if !enemy.active { 
-                continue
-            }
-
+            if !enemy.active { continue }
             enemy_radius := enemy.current_size * 0.5
             if enemy_radius <= 0.001 { continue }
-
             dist_sq := m.len_sq_vec2(particle.pos - enemy.pos)
             radii_sum := particle_radius + enemy_radius
             radii_sum_sq := radii_sum * radii_sum
-
             if dist_sq < radii_sum_sq {
                 enemy.hp -= 1 
-
                 particle.active = false 
-
                 if enemy.hp <= 0 {
                     enemy.active = false 
                     spawn_RMB_enemy_death_particles(enemy.pos) 
                 }
-                
                 break 
             }
         }
@@ -534,37 +495,62 @@ check_LMB_projectile_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_BLACKHOLES {
         proj := &state.blackholes[i]
-        if !proj.active {
-            continue
-        }
-
-        // Projectiles are scaled quads; effective radius is size/2
+        if !proj.active { continue }
         proj_radius := proj.size * 0.5
-
         for j in 0..<MAX_ENEMIES {
             enemy := &state.enemies[j]
-            // Check if enemy is active; it might have been deactivated by another projectile in the same frame.
-            if !enemy.active { 
-                continue
-            }
-
-            // Enemies are scaled quads; effective radius is current_size/2
+            if !enemy.active { continue }
             enemy_radius := enemy.current_size * 0.5
-
-            // Circle-vs-circle collision check
             dist_sq := m.len_sq_vec2(proj.pos - enemy.pos)
             radii_sum := proj_radius + enemy_radius
             radii_sum_sq := radii_sum * radii_sum
-
             if dist_sq < radii_sum_sq {
-                proj.active = false    // Projectile is consumed
-                enemy.active = false   // Enemy is hit/destroyed
-                
-                spawn_LMB_enemy_death_particles(enemy.pos, enemy.color) // Spawn death effect
-
-                // Since projectile is consumed, it cannot hit another enemy in this frame.
-                break // from inner enemy loop (j)
+                proj.active = false    
+                enemy.active = false   
+                spawn_LMB_enemy_death_particles(enemy.pos, enemy.color) 
+                break 
             }
+        }
+    }
+}
+
+// <<< NEW: Player-Enemy Collision Check >>>
+check_player_enemy_collisions :: proc() {
+    context = runtime.default_context()
+
+    // If player is already defeated or invulnerable, no need to check further
+    if state.player_hp <= 0 || state.player_invulnerable_timer > 0.0 {
+        return
+    }
+
+    player_radius := f32(PLAYER_CORE_WORLD_RADIUS)
+
+    for i in 0..<MAX_ENEMIES {
+        enemy := &state.enemies[i]
+        if !enemy.active || enemy.is_growing { // Don't collide if enemy is still growing
+            continue
+        }
+
+        enemy_radius := enemy.current_size * 0.5
+        if enemy_radius <= 0.001 { // Skip if enemy is too small to be a threat
+            continue
+        }
+
+        dist_sq := m.dist_sq_vec2(state.player_pos, enemy.pos)
+        radii_sum := player_radius + enemy_radius
+        radii_sum_sq := radii_sum * radii_sum
+
+        if dist_sq < radii_sum_sq {
+            state.player_hp -= ENEMY_GRUNT_DAMAGE_VALUE
+            state.player_hp = math.max(state.player_hp, 0) // Clamp HP to 0
+            state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION
+            
+            fmt.printf("Player hit by GRUNT! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
+            
+            // TODO: Later, implement enemy bounce-off logic here
+            // For now, the enemy passes through, but damage is applied and invulnerability starts.
+            
+            break // Player is hit, apply invulnerability, no need to check other enemies this frame
         }
     }
 }
@@ -582,57 +568,34 @@ get_mouse_world_pos :: proc() -> m.vec2 {
     context = runtime.default_context()
     screen_width := sapp.widthf()
     screen_height := sapp.heightf()
-
-    // 1. Convert mouse screen coordinates to Normalized Device Coordinates (NDC)
-    // Screen: (0,0) top-left, (width, height) bottom-right
-    // NDC: (-1,-1) bottom-left, (1,1) top-right
     ndc_x := (2.0 * state.mouse_screen_pos.x / screen_width) - 1.0
-    ndc_y := 1.0 - (2.0 * state.mouse_screen_pos.y / screen_height) // Y is inverted
-
-    // 2. Convert NDC to World Coordinates
-    // Our view matrix is identity. We only need to consider the orthographic projection.
+    ndc_y := 1.0 - (2.0 * state.mouse_screen_pos.y / screen_height) 
     aspect_ratio := screen_width / screen_height
-    ortho_width_vp := ORTHO_HEIGHT * aspect_ratio // This is half the world width visible
-
+    ortho_width_vp := ORTHO_HEIGHT * aspect_ratio 
     world_x := ndc_x * ortho_width_vp
     world_y := ndc_y * ORTHO_HEIGHT
-    
     return {world_x, world_y}
 }
 
 spawn_blackhole_projectile_weapon :: proc() {
     context = runtime.default_context()
+    if state.player_hp <= 0 { return; } // Don't allow actions if player is defeated
     spawn_pos := state.player_pos
-    
     target_world_pos := get_mouse_world_pos()
     direction_to_mouse := target_world_pos - spawn_pos
-    
     direction: m.vec2
-    if m.len_sq_vec2(direction_to_mouse) > 0.0001 { // Check if mouse is not on player
+    if m.len_sq_vec2(direction_to_mouse) > 0.0001 { 
         direction = m.norm_vec2(direction_to_mouse)
     } else {
-        // Default direction if mouse is on player (e.g., player's current velocity or fixed forward)
-        if m.len_sq_vec2(state.player_vel) > 0.001 {
-            direction = m.norm_vec2(state.player_vel)
-        } else {
-            direction = {0, 1} // Default upwards
-        }
+        if m.len_sq_vec2(state.player_vel) > 0.001 { direction = m.norm_vec2(state.player_vel)
+        } else { direction = {0, 1} }
     }
-
     vel := direction * PROJECTILE_BLACKHOLE_INITIAL_SPEED
     life := f32(PROJECTILE_BLACKHOLE_LIFETIME)
-
     rotation_angle := math.atan2(direction.y, direction.x) - m.PI / 2.0 
-    
     new_proj := Blackhole_Projectile {
-        pos = spawn_pos,
-        vel = vel,
-        size = PROJECTILE_BLACKHOLE_SCALE,
-        rotation = rotation_angle, // Use calculated angle
-        angular_vel = 0,//PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY * (rand.float32_range(0.8, 1.2)), 
-        life_remaining = life,
-        life_max = life,
-        active = false, 
+        pos = spawn_pos, vel = vel, size = PROJECTILE_BLACKHOLE_SCALE, rotation = rotation_angle, 
+        angular_vel = 0, life_remaining = life, life_max = life, active = false, 
     }
     emit_blackhole_projectile(new_proj)
 }
@@ -642,21 +605,14 @@ update_and_instance_blackholes :: proc(dt: f32) -> int {
     live_count := 0
     for i in 0..<MAX_BLACKHOLES {
         if !state.blackholes[i].active { continue }
-        
         p := &state.blackholes[i]
         p.life_remaining -= dt
-        if p.life_remaining <= 0.0 {
-            p.active = false
-            continue
-        }
-
+        if p.life_remaining <= 0.0 { p.active = false; continue }
         p.pos += p.vel * dt
         p.rotation += p.angular_vel * dt
         if p.rotation > m.TAU { p.rotation -= m.TAU }
         if p.rotation < 0    { p.rotation += m.TAU }
-
         life_ratio := p.life_remaining / p.life_max
-        
         if live_count < MAX_BLACKHOLES {
             inst := &state.blackhole_instance_data[live_count]
             inst.instance_pos_size_rot = {p.pos.x, p.pos.y, p.size, p.rotation}
@@ -772,53 +728,55 @@ frame :: proc "c" () {
     delta_time := f32(sapp.frame_duration()); delta_time = math.min(delta_time, 1.0/15.0);
 
     // --- Player Update ---
+    state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time);
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time)
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time)
 
-    accel_input := m.vec2_zero(); 
-    if state.key_w_down {accel_input.y+=1.0}; if state.key_s_down {accel_input.y-=1.0}; 
-    if state.key_a_down {accel_input.x-=1.0}; if state.key_d_down {accel_input.x+=1.0};  
-    if m.len_sq_vec2(accel_input) > 0.001 {accel_input=m.norm_vec2(accel_input)}; 
-    final_accel := accel_input*PLAYER_ACCELERATION; 
-    if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 { final_accel *= PLAYER_REVERSE_FACTOR };
-    state.player_vel += final_accel*delta_time; 
-    damping_factor := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time); 
-    state.player_vel *= damping_factor; 
-    if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
-    state.player_pos += state.player_vel*delta_time;
+    if state.player_hp > 0 {
+        accel_input := m.vec2_zero(); 
+        if state.key_w_down {accel_input.y+=1.0}; if state.key_s_down {accel_input.y-=1.0}; 
+        if state.key_a_down {accel_input.x-=1.0}; if state.key_d_down {accel_input.x+=1.0};  
+        if m.len_sq_vec2(accel_input) > 0.001 {accel_input=m.norm_vec2(accel_input)}; 
+        final_accel := accel_input*PLAYER_ACCELERATION; 
+        if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 { final_accel *= PLAYER_REVERSE_FACTOR };
+        state.player_vel += final_accel*delta_time; 
+        damping_factor := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time); 
+        state.player_vel *= damping_factor; 
+        if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
+        state.player_pos += state.player_vel*delta_time;
+
+        rmb_pressed_this_frame := state.rmb_down && !state.previous_rmb_down; 
+        if rmb_pressed_this_frame && state.rmb_cooldown_timer <= 0.0 { 
+            spawn_swirling_charge(); 
+            if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION } 
+        }; 
+        state.previous_rmb_down=state.rmb_down;
+
+        if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
+            spawn_blackhole_projectile_weapon();
+            state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
+        }
+        state.previous_lmb_down = state.lmb_down;
+    } else {
+        state.player_vel = {0,0}; 
+        if !state.player_defeated_message_shown {
+            fmt.printf("--- PLAYER DEFEATED ---\n");
+            state.player_defeated_message_shown = true;
+        }
+    }
+
 
     // --- Player Boundary Logic ---
     current_ortho_width_for_bounds := ORTHO_HEIGHT * aspect 
-    bounce_min_x : f32 = -current_ortho_width_for_bounds - PLAYER_BOUNCE_BOUNDARY_OFFSET
-    bounce_max_x : f32 =  current_ortho_width_for_bounds + PLAYER_BOUNCE_BOUNDARY_OFFSET
-    bounce_min_y : f32 = -ORTHO_HEIGHT - PLAYER_BOUNCE_BOUNDARY_OFFSET
-    bounce_max_y : f32 =  ORTHO_HEIGHT + PLAYER_BOUNCE_BOUNDARY_OFFSET
+    bounce_min_x : f32 = -current_ortho_width_for_bounds + PLAYER_CORE_WORLD_RADIUS // Adjusted for player radius
+    bounce_max_x : f32 =  current_ortho_width_for_bounds - PLAYER_CORE_WORLD_RADIUS // Adjusted for player radius
+    bounce_min_y : f32 = -ORTHO_HEIGHT + PLAYER_CORE_WORLD_RADIUS                // Adjusted for player radius
+    bounce_max_y : f32 =  ORTHO_HEIGHT - PLAYER_CORE_WORLD_RADIUS                // Adjusted for player radius
+
     if state.player_pos.x < bounce_min_x { state.player_pos.x = bounce_min_x; if state.player_vel.x < 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.x > bounce_max_x { state.player_pos.x = bounce_max_x; if state.player_vel.x > 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     if state.player_pos.y < bounce_min_y { state.player_pos.y = bounce_min_y; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.y > bounce_max_y { state.player_pos.y = bounce_max_y; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
-
-    // --- RMB Ability (Swirling Charge) ---
-    rmb_pressed_this_frame := state.rmb_down && !state.previous_rmb_down; 
-    if rmb_pressed_this_frame && state.rmb_cooldown_timer <= 0.0 { 
-        spawn_swirling_charge(); 
-        if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION } 
-    }; 
-    state.previous_rmb_down=state.rmb_down;
-
-    // --- LMB Weapon (Black Hole Projectile) ---
-    // For continuous fire while holding LMB:
-    if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
-        spawn_blackhole_projectile_weapon();
-        state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
-    }
-    // For single fire on click (uncomment this and comment/remove the above block if preferred):
-    // lmb_pressed_this_frame := state.lmb_down && !state.previous_lmb_down;
-    // if lmb_pressed_this_frame && state.lmb_cooldown_timer <= 0.0 {
-    //     spawn_blackhole_projectile_weapon();
-    //     state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
-    // }
-    state.previous_lmb_down = state.lmb_down;
     
     // --- Enemy Spawning ---
     state.enemy_spawn_timer -= delta_time
@@ -836,10 +794,16 @@ frame :: proc "c" () {
     // --- Collision Detection ---
     check_LMB_projectile_enemy_collisions();
     check_RMB_particle_enemy_collisions();
+    check_player_enemy_collisions(); // <<< CALL NEW COLLISION FUNCTION
 
     // --- Setup Uniforms & View Projection ---
     state.bg_fs_params={tick=current_time, resolution={width,height}, bg_option=1}; 
-    state.player_fs_params={tick=current_time, resolution={width,height}}; 
+    state.player_fs_params={
+        tick=current_time, 
+        resolution={width,height},
+        player_hp_uniform=f32(state.player_hp), // Pass current HP to shader
+        player_max_hp_uniform=f32(state.player_max_hp),
+    }; 
     state.particle_fs_params={tick=current_time};
     state.enemy_fs_params={tick=current_time}; 
     state.blackhole_fs_params={tick=current_time};
@@ -893,4 +857,4 @@ frame :: proc "c" () {
 
 
 cleanup :: proc "c" () { context=runtime.default_context(); sg.shutdown(); }
-main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Mouse Aim Projectiles", icon={sokol_default=true}, logger={func=slog.func} }) }
+main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Grunt Collision", icon={sokol_default=true}, logger={func=slog.func} }) }

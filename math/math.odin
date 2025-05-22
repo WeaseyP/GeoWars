@@ -62,6 +62,12 @@ angle_to_vec2 :: proc "contextless" (angle_radians: f32) -> vec2 {
     return vec2{c, s}; 
 }
 
+dist_sq_vec2 :: proc(a, b: vec2) -> f32 {
+    diff_x := a.x - b.x
+    diff_y := a.y - b.y
+    return diff_x * diff_x + diff_y * diff_y
+}
+
 identity :: proc {
     identity_mat4,
 }
