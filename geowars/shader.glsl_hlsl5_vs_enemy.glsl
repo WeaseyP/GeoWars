@@ -17,7 +17,7 @@ layout(location=6) in vec4 instance_effect_params_vs_in;
 out vec4 enemy_color_out_fs;
 out vec2 enemy_uv_out_fs;
 out vec4 enemy_effect_params_fs; 
-out float enemy_visual_scale_fs_out;
+out float enemy_visual_scale_fs;
 
                                  
 void main() {
@@ -38,5 +38,5 @@ void main() {
     enemy_color_out_fs = instance_color_vs_in;
     enemy_uv_out_fs = quad_uv_in; 
     enemy_effect_params_fs = instance_effect_params_vs_in;
-    enemy_visual_scale_fs_out = instance_visual_scale_vs_in; 
+    enemy_visual_scale_fs = instance_visual_scale_vs_in; 
 }

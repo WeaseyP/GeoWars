@@ -77,7 +77,7 @@ ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ :: 0.5 * 0.5
 ENEMY_MAX_SPAWN_ATTEMPTS :: 10
 ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
 ENEMY_GROW_DURATION :: 1.0     
-ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7
+ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.1
 ENEMY_BASE_ALPHA :: 0.65           
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
@@ -85,12 +85,12 @@ ENEMY_GRUNT_MAX_HP :: 2
 ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
 ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
-ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
+ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 0.9 // NEW: Quad is 2.5x bigger during death anim
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
-LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
-LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 2
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 1.5
 LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
 LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
 LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
@@ -99,8 +99,8 @@ LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
 
 // RMB Enemy Death Particle Constants
 RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
-RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
-RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 1.5
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 1
 RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
 RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.2
 RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 
@@ -832,8 +832,14 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
         start_pos.x = -current_ortho_width * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
     }
     start_vel: m.vec2 = {0.0, 0.0} 
-    base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
-    grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
+    random_base_hue := rand.float32_range(0.0, 1.0); // A value from 0.0 to 1.0 representing the hue
+    grunt_color := m.vec4{
+            random_base_hue, // Store base hue in .r
+            0.8,             // Placeholder or base for saturation (shader can override or use)
+            0.9,             // Placeholder or base for value/brightness (shader can override or use)
+            ENEMY_BASE_ALPHA // Base alpha
+    };
+    
     initial_wander_angle := rand.float32() * m.TAU
     initial_wander_vector := m.angle_to_vec2(initial_wander_angle)
 grunt := Enemy {
