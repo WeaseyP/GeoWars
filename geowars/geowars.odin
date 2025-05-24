@@ -70,14 +70,20 @@ PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY :: m.PI * 1.5
 
 // --- Enemy Constants ---
 ENEMY_GRUNT_SCALE :: 0.2
-ENEMY_GRUNT_SPEED :: 0.5 
+ENEMY_GRUNT_SPEED :: f32(0.5)
+// --- SlowBoy Constants ---
+ENEMY_SLOWBOY_BASE_SCALE :: 0.25
+ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
+ENEMY_SLOWBOY_SPEED :: f32(0.3)
+ENEMY_SLOWBOY_MAX_HP :: 10
+// --- Common Enemy Constants ---
 ENEMY_SPAWN_INTERVAL :: 0.5
 ENEMY_SPAWN_BORDER_FRACTION :: 0.5 
 ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ :: 0.5 * 0.5 
 ENEMY_MAX_SPAWN_ATTEMPTS :: 10
 ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
 ENEMY_GROW_DURATION :: 1.0     
-ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.1
+ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7
 ENEMY_BASE_ALPHA :: 0.65           
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
@@ -85,12 +91,12 @@ ENEMY_GRUNT_MAX_HP :: 2
 ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
 ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
-ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 0.9 // NEW: Quad is 2.5x bigger during death anim
+ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
-LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 2
-LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 1.5
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
 LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
 LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
 LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
@@ -99,8 +105,8 @@ LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
 
 // RMB Enemy Death Particle Constants
 RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
-RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 1.5
-RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 1
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
 RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
 RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.2
 RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 
@@ -121,6 +127,13 @@ RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6         // How fast each p
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7
+
+// --- Enemy Type Enum ---
+EnemyType :: enum {
+    GRUNT,
+    SLOWBOY,
+}
+
 particle_quad_stride :: size_of(f32) * 4
 enemy_quad_stride :: size_of(f32) * 4 
 blackhole_quad_stride :: size_of(f32) * 4
@@ -182,6 +195,7 @@ Enemy :: struct {
     rotation: f32,         
     angular_vel: f32,    
     hp: i32, 
+    type: EnemyType, // <<< NEW: Enemy type
     active: bool,
     current_wander_vector: m.vec2,
     wander_timer: f32,
@@ -192,11 +206,13 @@ Enemy :: struct {
 
 Enemy_Instance_Data :: struct #align(16) {
     using _: struct #packed {
-        instance_pos: m.vec2,         
-        instance_main_rotation: f32,  
-        instance_visual_scale: f32,   
-        instance_color: m.vec4,       
-        instance_effect_params: m.vec4,
+        instance_pos: m.vec2,         // 8 bytes
+        instance_main_rotation: f32,  // 4 bytes
+        instance_visual_scale: f32,   // 4 bytes (Total 16)
+        instance_color: m.vec4,       // 16 bytes (Total 32)
+        instance_effect_params: m.vec4, // 16 bytes (Total 48)
+        instance_enemy_type: f32,     // 4 bytes  (Total 52)
+        _padding0: m.vec3,            // 12 bytes (Total 64, which is 4 * 16)
     },
 }
 
@@ -304,6 +320,10 @@ init :: proc "c" () {
                 ATTR_enemy_instance_visual_scale_vs_in={buffer_index=1,offset=12,format=.FLOAT},
                 ATTR_enemy_instance_color_vs_in={buffer_index=1,offset=16,format=.FLOAT4}, 
                 ATTR_enemy_instance_effect_params_vs_in={buffer_index=1,offset=32,format=.FLOAT4},
+                // New attribute for enemy type:
+                // Verifying the attribute name as per subtask.
+                // The shader GLSL uses layout(location=7) for instance_enemy_type_vs_in.
+                ATTR_enemy_instance_enemy_type_vs_in={buffer_index=1,offset=48,format=.FLOAT},
             }
         },
         primitive_type=.TRIANGLE_STRIP, 
@@ -832,27 +852,58 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
         start_pos.x = -current_ortho_width * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
     }
     start_vel: m.vec2 = {0.0, 0.0} 
-    random_base_hue := rand.float32_range(0.0, 1.0); // A value from 0.0 to 1.0 representing the hue
-    grunt_color := m.vec4{
-            random_base_hue, // Store base hue in .r
-            0.8,             // Placeholder or base for saturation (shader can override or use)
-            0.9,             // Placeholder or base for value/brightness (shader can override or use)
-            ENEMY_BASE_ALPHA // Base alpha
-    };
-    
     initial_wander_angle := rand.float32() * m.TAU
     initial_wander_vector := m.angle_to_vec2(initial_wander_angle)
-grunt := Enemy {
-        pos = start_pos, vel = start_vel, color = grunt_color, 
-        target_size = ENEMY_GRUNT_SCALE, current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
-        grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
-        rotation = rand.float32() * m.TAU, 
-        angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED, // Spin between -MAX and +MAX
-        hp = ENEMY_GRUNT_MAX_HP, 
-        active = false, current_wander_vector = initial_wander_vector,
-        wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL), 
+
+    enemy_to_spawn: Enemy
+
+    // Randomly decide enemy type
+    spawn_rng := rand.float32()
+    if spawn_rng < 0.7 { // 70% chance to spawn GRUNT
+        base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
+        grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
+        enemy_to_spawn = Enemy {
+            pos = start_pos, 
+            vel = start_vel, 
+            color = grunt_color, 
+            target_size = ENEMY_GRUNT_SCALE, 
+            current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
+            grow_timer = ENEMY_GROW_DURATION, 
+            is_growing = true,                                             
+            rotation = rand.float32() * m.TAU, 
+            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED,
+            hp = ENEMY_GRUNT_MAX_HP, 
+            type = .GRUNT,
+            active = false, 
+            current_wander_vector = initial_wander_vector,
+            wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
+            is_dying = false,
+            dying_timer = 0.0,
+            death_rect_offset = 0.0,
+        }
+    } else { // 30% chance to spawn SLOWBOY
+        slowboy_color_initial := m.vec4{0.3, 0.7, 0.9, ENEMY_BASE_ALPHA} // Light blue
+        enemy_to_spawn = Enemy {
+            pos = start_pos, 
+            vel = start_vel, 
+            color = slowboy_color_initial, 
+            target_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_SLOWBOY_GLOW_CANVAS_SF, 
+            current_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
+            grow_timer = ENEMY_GROW_DURATION, // Can share grow duration or have its own
+            is_growing = true,                                             
+            rotation = rand.float32() * m.TAU, 
+            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5, // Slower spin for SlowBoy
+            hp = ENEMY_SLOWBOY_MAX_HP, 
+            type = .SLOWBOY,
+            active = false, 
+            current_wander_vector = initial_wander_vector, // Can share wander logic or have its own
+            wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
+            is_dying = false,
+            dying_timer = 0.0,
+            death_rect_offset = 0.0,
+        }
     }
-    emit_enemy(grunt)
+    emit_enemy(enemy_to_spawn)
 }
 update_and_instance_enemies :: proc(dt: f32) -> int {
     context = runtime.default_context()
@@ -901,7 +952,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             effect_params_w = 1.0 - progress_raw; // Alpha multiplier
 
             // The quad itself is rendered larger during death
-            current_visual_scale_for_shader = enemy.target_size * ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
+            current_visual_scale_for_shader = enemy.target_size;
             
             // Conceptual enemy size (for collision or other logic, though dying enemies are skipped in collision)
             // This reflects the actual visual shrinkage of the parts in world terms.
@@ -941,9 +992,12 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             }
             if dist_sq_to_player > 0.00001 {
                 normalized_final_direction := m.norm_vec2(final_direction);
-                enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED;
+                // Speed depends on type
+                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = normalized_final_direction * current_speed;
             } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
-                enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED;
+                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = m.norm_vec2(direction_to_player_strict) * current_speed;
             } else { enemy.vel = m.vec2_zero(); }
             enemy.pos += enemy.vel * dt;
 
@@ -971,9 +1025,12 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             }
             if dist_sq_to_player > 0.00001 {
                 normalized_final_direction := m.norm_vec2(final_direction);
-                enemy.vel = normalized_final_direction * ENEMY_GRUNT_SPEED;
+                // Speed depends on type
+                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = normalized_final_direction * current_speed;
             } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
-                enemy.vel = m.norm_vec2(direction_to_player_strict) * ENEMY_GRUNT_SPEED;
+                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = m.norm_vec2(direction_to_player_strict) * current_speed;
             } else { enemy.vel = m.vec2_zero(); }
             enemy.pos += enemy.vel * dt;
         }
@@ -989,6 +1046,14 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             inst.instance_visual_scale = current_visual_scale_for_shader;
             inst.instance_color = enemy.color;
             inst.instance_effect_params = {effect_params_x, effect_params_y, effect_params_z, effect_params_w};
+            // Set enemy type for shader (0.0 for Grunt, 1.0 for SlowBoy)
+            if enemy.type == .GRUNT {
+                inst.instance_enemy_type = 0.0;
+            } else if enemy.type == .SLOWBOY {
+                inst.instance_enemy_type = 1.0;
+            } else {
+                inst.instance_enemy_type = 0.0; // Default / fallback
+            }
             live_enemy_count += 1;
         }
     }
