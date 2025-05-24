@@ -37,6 +37,7 @@ PLAYER_BOUNCE_DAMPING_FACTOR :: 1.05
 PLAYER_MAX_HP_VALUE      :: 4 // From previous implementation
 PLAYER_INVULNERABILITY_DURATION :: 0.75 // From previous implementation for particle hits
 PARTICLE_DAMAGE_VALUE    :: 1 // From previous (RMB particle damage)
+LMB_PROJECTILE_DAMAGE    :: 2 // <<< NEW: Damage LMB projectile deals
 ENEMY_GRUNT_DAMAGE_VALUE :: 1 // <<< NEW: Damage grunt deals to player
 
 // Black Hole (RMB) Constants
@@ -74,8 +75,15 @@ ENEMY_GRUNT_SPEED :: f32(0.5)
 // --- SlowBoy Constants ---
 ENEMY_SLOWBOY_BASE_SCALE :: 0.25
 ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
-ENEMY_SLOWBOY_SPEED :: f32(0.3)
+ENEMY_SLOWBOY_SPEED :: f32(0.15)
 ENEMY_SLOWBOY_MAX_HP :: 10
+// --- SlowBoy Attack Constants ---
+SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; // UPDATED
+SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
+SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; // UPDATED
+SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; // UPDATED
+SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; // Multiplier for PLAYER_MAX_SPEED
+SLOWBOY_ATTACK_DAMAGE :: 1;
 // --- Common Enemy Constants ---
 ENEMY_SPAWN_INTERVAL :: 0.5
 ENEMY_SPAWN_BORDER_FRACTION :: 0.5 
@@ -89,6 +97,8 @@ ENEMY_WANDER_INFLUENCE :: 0.35
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
 ENEMY_GRUNT_MAX_HP :: 2
 ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
+GRUNT_DEATH_ANIM_DURATION :: 3.0 
+SLOWBOY_DEATH_ANIM_DURATION :: 1.0
 ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
 ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
@@ -202,6 +212,15 @@ Enemy :: struct {
     is_dying: bool,
     dying_timer: f32,
     death_rect_offset: f32,
+    death_anim_max_duration: f32,
+
+    // --- SlowBoy Attack State ---
+    is_winding_up_attack: bool,
+    attack_windup_timer: f32,
+    has_locked_attack_trajectory: bool,
+    attack_charge_target_pos: m.vec2,
+    is_charging_attack: bool,
+    attack_charge_start_pos: m.vec2,
 }
 
 Enemy_Instance_Data :: struct #align(16) {
@@ -252,7 +271,8 @@ state: struct {
     enemies: [MAX_ENEMIES]Enemy, enemy_instance_data: [MAX_ENEMIES]Enemy_Instance_Data,
     enemy_instance_vbo: sg.Buffer, enemy_bind: sg.Bindings,
     next_enemy_index: int, num_active_enemies: int,
-    enemy_spawn_timer: f32, 
+    grunt_spawn_timer: f32, // UPDATED
+    slowboy_spawn_timer: f32, // UPDATED
     
 }
 
@@ -354,8 +374,11 @@ init :: proc "c" () {
     state.current_rmb_ammo_charges = 0; // Start with 0 charges, or MAX_RMB_AMMO_CHARGES for full
     state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL/10; // Timer for the first charge
 
+    // Initialize new enemy spawn timers
+    state.grunt_spawn_timer = 1.0; 
+    state.slowboy_spawn_timer = 5.0; 
 
-    state.enemy_spawn_timer = rand.float32_range(2.0, 3.0)
+    // state.enemy_spawn_timer = rand.float32_range(2.0, 3.0) // REMOVED
     fmt.printf("--- Init Complete ---\n")
 }
 
@@ -633,10 +656,18 @@ check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
         particle := &state.particles[i]
-        // Ensure it's a damaging particle, not an ammo indicator or already burst
-        if !particle.active || particle.is_burst_particle || particle.is_ammo_indicator || !particle.is_swirling_charge { 
-            continue
+        // Filter out non-active, ammo indicators, or dedicated "burst" (like enemy death) particles.
+        // Allow both swirling_charge particles and their subsequent explosion phase particles.
+        if !particle.active || particle.is_ammo_indicator || particle.is_burst_particle {
+            continue;
         }
+        // Further ensure it's a particle from the RMB ability (either swirling or exploded from swirl)
+        // Swirling particles have is_swirling_charge = true.
+        // Explosion particles had is_swirling_charge = true, then it became false and they got new life.
+        // We need a robust way to identify them.
+        // For now, the above filter might be okay if PARTICLE_DAMAGE_VALUE is meant for all RMB weapon particles.
+        // The key is that `is_burst_particle` is false for the swirl cloud and its explosion phase.
+        // `is_burst_particle` is true for particles spawned by `spawn_LMB_enemy_death_particles` and `spawn_RMB_enemy_death_particles`.
         particle_radius := particle.size * 0.5 
         if particle_radius <= 0.001 { continue }
 
@@ -660,7 +691,16 @@ check_RMB_particle_enemy_collisions :: proc() {
 
                 if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
                     enemy.is_dying = true;
-                    enemy.dying_timer = ENEMY_DEATH_ANIM_DURATION;
+                    if enemy.type == .GRUNT {
+                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    } else if enemy.type == .SLOWBOY {
+                        enemy.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
+                        enemy.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
+                    } else { // Default fallback, though all enemies should have a type
+                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION; // Or some other default
+                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    }
                     enemy.death_rect_offset = 0.0;
                     // enemy.angular_vel = 0; // Optional
 
@@ -694,10 +734,19 @@ check_LMB_projectile_enemy_collisions :: proc() {
             if dist_sq < radii_sum_sq {
                 proj.active = false    // Projectile is consumed
                 
-                if !enemy.is_dying { // Only start dying if not already
-                    enemy.hp = 0; 
+                enemy.hp -= LMB_PROJECTILE_DAMAGE; // Apply damage
+                if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
                     enemy.is_dying = true;
-                    enemy.dying_timer = ENEMY_DEATH_ANIM_DURATION;
+                    if enemy.type == .GRUNT {
+                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    } else if enemy.type == .SLOWBOY {
+                        enemy.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
+                        enemy.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
+                    } else { // Default fallback
+                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    }
                     enemy.death_rect_offset = 0.0;
                     // enemy.angular_vel = 0; // Optional
 
@@ -830,7 +879,7 @@ emit_enemy :: proc(enemy_data: Enemy) {
     state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
-spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2) {
+spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: EnemyType) { // MODIFIED SIGNATURE
     context = runtime.default_context()
     start_pos: m.vec2
     valid_spawn_found := false
@@ -857,9 +906,8 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
 
     enemy_to_spawn: Enemy
 
-    // Randomly decide enemy type
-    spawn_rng := rand.float32()
-    if spawn_rng < 0.7 { // 70% chance to spawn GRUNT
+    // MODIFIED: Direct type assignment based on parameter
+    if type_to_spawn == .GRUNT {
         base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
         grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
         enemy_to_spawn = Enemy {
@@ -873,15 +921,16 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             rotation = rand.float32() * m.TAU, 
             angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED,
             hp = ENEMY_GRUNT_MAX_HP, 
-            type = .GRUNT,
+            type = .GRUNT, // Explicitly set type
             active = false, 
             current_wander_vector = initial_wander_vector,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
             is_dying = false,
             dying_timer = 0.0,
             death_rect_offset = 0.0,
+            death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION,
         }
-    } else { // 30% chance to spawn SLOWBOY
+    } else if type_to_spawn == .SLOWBOY {
         slowboy_color_initial := m.vec4{0.3, 0.7, 0.9, ENEMY_BASE_ALPHA} // Light blue
         enemy_to_spawn = Enemy {
             pos = start_pos, 
@@ -889,19 +938,29 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             color = slowboy_color_initial, 
             target_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_SLOWBOY_GLOW_CANVAS_SF, 
             current_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
-            grow_timer = ENEMY_GROW_DURATION, // Can share grow duration or have its own
+            grow_timer = ENEMY_GROW_DURATION,
             is_growing = true,                                             
             rotation = rand.float32() * m.TAU, 
-            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5, // Slower spin for SlowBoy
+            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5,
             hp = ENEMY_SLOWBOY_MAX_HP, 
-            type = .SLOWBOY,
+            type = .SLOWBOY, // Explicitly set type
             active = false, 
-            current_wander_vector = initial_wander_vector, // Can share wander logic or have its own
+            current_wander_vector = initial_wander_vector,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
             is_dying = false,
             dying_timer = 0.0,
             death_rect_offset = 0.0,
+            death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION,
+            is_winding_up_attack = false,
+            attack_windup_timer = 0.0,
+            has_locked_attack_trajectory = false,
+            attack_charge_target_pos = {0,0},
+            is_charging_attack = false,
+            attack_charge_start_pos = {0,0},
         }
+    } else {
+        fmt.printf("spawn_enemy: WARNING - Unknown type_to_spawn: %v\n", type_to_spawn);
+        return; // Do not spawn if type is unknown
     }
     emit_enemy(enemy_to_spawn)
 }
@@ -914,52 +973,92 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         if !state.enemies[i].active { continue }
         enemy := &state.enemies[i]
 
+        has_updated_pos_for_charge_bounce := false; // <<< NEW FLAG
+
         current_visual_scale_for_shader: f32
         effect_params_x: f32 = 0.0; // is_dying
         effect_params_y: f32 = 0.0; // death_rect_offset
-        effect_params_z: f32 = 1.0; // current_part_scale_multiplier (default to 1.0 relative to its quad)
-        effect_params_w: f32 = 1.0; // overall_dying_alpha_multiplier (default to 1.0)
-
+        effect_params_z: f32 = 1.0; 
+        effect_params_w: f32 = 1.0; 
 
         if enemy.is_dying {
             effect_params_x = 1.0; 
-
+            effect_params_y = enemy.death_rect_offset;
+            // z and w for dying are set based on progress_raw later in this block
             enemy.dying_timer -= dt;
             enemy.death_rect_offset += ENEMY_DEATH_RECT_SEPARATION_SPEED * dt;
-            effect_params_y = enemy.death_rect_offset;
-
+            
             if enemy.dying_timer <= 0.0 {
                 enemy.active = false;
                 continue;
             }
 
-            progress_raw := 1.0 - math.clamp(enemy.dying_timer / ENEMY_DEATH_ANIM_DURATION, 0.0, 1.0);
+            progress_raw: f32
+            if enemy.death_anim_max_duration > 0.0 { // Avoid division by zero if not set
+                progress_raw = 1.0 - math.clamp(enemy.dying_timer / enemy.death_anim_max_duration, 0.0, 1.0);
+            } else { // Fallback if death_anim_max_duration is somehow zero
+                progress_raw = 0.0; 
+            }
             eased_progress_for_scale := math.pow(progress_raw, 2.5); // For slower shrink at start
 
-            // --- MODIFIED LOGIC FOR PART SCALE (effect_params_z) ---
-            // At the start of death (progress_raw = 0), parts should appear as they were (full size).
-            // On the enlarged death quad, their UVs need to be scaled down initially to compensate for the larger quad.
-            // Initial scale of parts relative to the enlarged quad's UVs:
+
+
+
+            effect_params_w = 1.0 - progress_raw; 
             initial_part_uv_scale : f32 = 1.0 / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER; 
-            // Final scale of parts relative to the enlarged quad's UVs:
-            // (If final world scale is 0, then final UV scale on the enlarged quad is also 0)
             final_part_uv_scale : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
-            // If ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR is 0, then final_part_uv_scale is 0.
+            effect_params_z = m.lerp(initial_part_uv_scale, final_part_uv_scale, eased_progress_for_scale); 
 
-            effect_params_z = m.lerp(initial_part_uv_scale, final_part_uv_scale, eased_progress_for_scale);
-            // --- END MODIFICATION ---
-
-            effect_params_w = 1.0 - progress_raw; // Alpha multiplier
-
-            // The quad itself is rendered larger during death
             current_visual_scale_for_shader = enemy.target_size;
+            enemy.current_size = f32(m.lerp(enemy.target_size, enemy.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale)); // Cast to f32
+        
+        } else if enemy.type == .SLOWBOY && enemy.is_winding_up_attack {
+            effect_params_x = 0.0; 
+            effect_params_y = 1.0; 
+            effect_params_z = enemy.attack_windup_timer; 
+            effect_params_w = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION; 
             
-            // Conceptual enemy size (for collision or other logic, though dying enemies are skipped in collision)
-            // This reflects the actual visual shrinkage of the parts in world terms.
-            enemy.current_size = m.lerp(enemy.target_size, enemy.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale);
+            current_visual_scale_for_shader = enemy.current_size; 
 
-
+            // WINDUP LOGIC
+            enemy.attack_windup_timer -= dt;
+            if enemy.attack_windup_timer <= SLOWBOY_ATTACK_LOCKON_TIME_REMAINING && !enemy.has_locked_attack_trajectory {
+                enemy.attack_charge_target_pos = player_pos; // player_pos is available in this function
+                enemy.has_locked_attack_trajectory = true;
+            }
+            if enemy.attack_windup_timer <= 0.0 {
+                enemy.is_winding_up_attack = false;
+                enemy.is_charging_attack = true;
+                enemy.attack_charge_start_pos = enemy.pos;
+                
+                charge_direction_vec := enemy.attack_charge_target_pos - enemy.attack_charge_start_pos;
+                if m.len_sq_vec2(charge_direction_vec) > 0.0001 { // Avoid normalization of zero vector
+                    charge_direction_vec = m.norm_vec2(charge_direction_vec);
+                } else {
+                    // Fallback direction if target is same as start (e.g., player didn't move)
+                    // Default to moving "forward" relative to current orientation or a default like {0,1}
+                    // For simplicity, let's use a default if no player velocity either.
+                    // A better fallback might be based on player's last known movement or enemy's current facing.
+                    // Given the context, if player is at the exact same spot, a small nudge or default direction.
+                    // We can use player's current direction if available, or a default.
+                    // The problem statement implies player_pos is the target, so this case is rare.
+                    // If player is somehow exactly on top of enemy start, pick a default.
+                    charge_direction_vec = m.vec2{0, 1}; // Default direction (e.g., upwards)
+                }
+                enemy.vel = charge_direction_vec * PLAYER_MAX_SPEED * SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR;
+                enemy.angular_vel = 0; // Stop spinning during charge
+            }
+        
         } else if enemy.is_growing {
+            effect_params_x = 0.0; 
+            effect_params_y = 0.0; 
+            if enemy.type == .SLOWBOY { 
+                effect_params_z = ENEMY_SLOWBOY_GLOW_CANVAS_SF;
+            } else { 
+                effect_params_z = 1.0; 
+            }
+            effect_params_w = 1.0; 
+
             enemy.grow_timer -= dt;
             if enemy.grow_timer <= 0.0 {
                 enemy.current_size = enemy.target_size;
@@ -971,68 +1070,164 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 initial_actual_size := enemy.target_size * ENEMY_INITIAL_SCALE_FACTOR;
                 enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress);
             }
-            current_visual_scale_for_shader = enemy.current_size; // Quad scales with current_size
-            effect_params_z = 1.0; // Parts are full scale relative to the (growing) quad
-            effect_params_w = 1.0; 
+            current_visual_scale_for_shader = enemy.current_size;
             
             enemy.rotation += enemy.angular_vel * dt;
-            // ... (rest of growing movement logic) ...
+            
             enemy.wander_timer -= dt;
             if enemy.wander_timer <= 0.0 {
                 new_wander_angle := rand.float32() * m.TAU;
                 enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
                 enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
             }
-            direction_to_player_strict := player_pos - enemy.pos;
-            final_direction := direction_to_player_strict;
-            dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict);
-            if dist_sq_to_player > 0.001 {
-                normalized_strict_direction := m.norm_vec2(direction_to_player_strict);
-                final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+            direction_to_player_strict_growing := player_pos - enemy.pos; // Use a different variable name to avoid conflict
+            final_direction_growing := direction_to_player_strict_growing;
+            dist_sq_to_player_growing := m.len_sq_vec2(direction_to_player_strict_growing);
+            if dist_sq_to_player_growing > 0.001 {
+                normalized_strict_direction_growing := m.norm_vec2(direction_to_player_strict_growing);
+                final_direction_growing = normalized_strict_direction_growing + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
             }
-            if dist_sq_to_player > 0.00001 {
-                normalized_final_direction := m.norm_vec2(final_direction);
-                // Speed depends on type
-                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = normalized_final_direction * current_speed;
-            } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
-                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = m.norm_vec2(direction_to_player_strict) * current_speed;
+            if dist_sq_to_player_growing > 0.00001 {
+                normalized_final_direction_growing := m.norm_vec2(final_direction_growing);
+                current_speed_growing : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = normalized_final_direction_growing * current_speed_growing;
+            } else if m.len_sq_vec2(direction_to_player_strict_growing) > 0.00001 {
+                current_speed_growing : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
+                enemy.vel = m.norm_vec2(direction_to_player_strict_growing) * current_speed_growing;
             } else { enemy.vel = m.vec2_zero(); }
-            enemy.pos += enemy.vel * dt;
+            // enemy.pos update is now after all logic including attack states
 
 
-        } else { // Alive and not growing (normal behavior)
+        } else { // Alive and not growing (normal behavior OR SlowBoy attack logic)
             enemy.current_size = enemy.target_size;
-            current_visual_scale_for_shader = enemy.current_size; // Quad is target_size
-            effect_params_z = 1.0; // Parts are full scale relative to the quad
-            effect_params_w = 1.0; 
+            current_visual_scale_for_shader = enemy.current_size; 
             
+            current_visual_scale_for_shader = enemy.current_size; 
+            
+            // This 'else' block handles enemies that are ALIVE and NOT GROWING.
+            // (Also, if it's a SlowBoy, it's NOT WINDING UP, as that's a separate `else if` branch)
+            current_visual_scale_for_shader = enemy.current_size;
             enemy.rotation += enemy.angular_vel * dt;
-            // ... (rest of alive movement logic) ...
-             enemy.wander_timer -= dt;
-            if enemy.wander_timer <= 0.0 {
-                new_wander_angle := rand.float32() * m.TAU;
-                enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
-                enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+
+            // Default effect_params for this state.
+            effect_params_x = 0.0;
+            effect_params_y = 0.0;
+            effect_params_w = 1.0;
+            if enemy.type == .SLOWBOY {
+                effect_params_z = ENEMY_SLOWBOY_GLOW_CANVAS_SF;
+            } else { // Grunt
+                effect_params_z = 1.0;
             }
-            direction_to_player_strict := player_pos - enemy.pos;
-            final_direction := direction_to_player_strict;
-            dist_sq_to_player := m.len_sq_vec2(direction_to_player_strict);
-            if dist_sq_to_player > 0.001 {
-                normalized_strict_direction := m.norm_vec2(direction_to_player_strict);
-                final_direction = normalized_strict_direction + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+            
+            if enemy.type == .SLOWBOY {
+                 // Note: enemy.is_winding_up_attack is handled by the `else if` block above.
+                 // So, this code runs if the SlowBoy is NOT winding up.
+                player_dist_sq := m.dist_sq_vec2(enemy.pos, player_pos);
+                if enemy.is_charging_attack {
+                    has_updated_pos_for_charge_bounce = true; // Mark that this SlowBoy's position update is handled here
+
+                    // --- Screen Boundary Calculations ---
+                    aspect_ratio := sapp.widthf() / sapp.heightf();
+                    current_ortho_width := ORTHO_HEIGHT * aspect_ratio;
+                    enemy_half_size := enemy.current_size * 0.5;
+
+                    min_x := -current_ortho_width + enemy_half_size;
+                    max_x :=  current_ortho_width - enemy_half_size;
+                    min_y := -ORTHO_HEIGHT + enemy_half_size;
+                    max_y :=  ORTHO_HEIGHT - enemy_half_size;
+
+                    // --- Position Update (specific for charging SlowBoy) ---
+                    enemy.pos += enemy.vel * dt;
+
+                    // --- Bounce Logic ---
+                    if enemy.pos.x < min_x {
+                        enemy.pos.x = min_x;
+                        enemy.vel.x *= -1;
+                    } else if enemy.pos.x > max_x {
+                        enemy.pos.x = max_x;
+                        enemy.vel.x *= -1;
+                    }
+
+                    if enemy.pos.y < min_y {
+                        enemy.pos.y = min_y;
+                        enemy.vel.y *= -1;
+                    } else if enemy.pos.y > max_y {
+                        enemy.pos.y = max_y;
+                        enemy.vel.y *= -1;
+                    }
+                    
+                    // --- Original Charge Distance Check ---
+                    charge_distance_world_units: f32 = ORTHO_HEIGHT * 2.0 * SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION;
+                    charge_distance_sq := charge_distance_world_units * charge_distance_world_units;
+                    
+                    if m.dist_sq_vec2(enemy.pos, enemy.attack_charge_start_pos) >= charge_distance_sq {
+                        enemy.is_charging_attack = false;
+                        enemy.vel = {0,0}; // Stop movement
+                    }
+                } else { // SLOWBOY IS ALIVE, NOT GROWING, NOT WINDING, NOT CHARGING
+                    // effect_params are already set to normal for SlowBoy.
+                    if player_dist_sq < (SLOWBOY_ATTACK_DETECT_RANGE * SLOWBOY_ATTACK_DETECT_RANGE) && !enemy.is_winding_up_attack && !enemy.is_charging_attack {
+                        enemy.is_winding_up_attack = true;
+                        enemy.attack_windup_timer = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION;
+                        enemy.has_locked_attack_trajectory = false;
+                        enemy.is_charging_attack = false;
+                        enemy.vel = {0,0}; 
+                        // The specific effect_params for wind-up will be set in the next frame
+                        // by the `else if enemy.type == .SLOWBOY && enemy.is_winding_up_attack` block.
+                    } else {
+                        // Standard SlowBoy non-attacking movement logic
+                        enemy.wander_timer -= dt;
+                        if enemy.wander_timer <= 0.0 {
+                            new_wander_angle := rand.float32() * m.TAU;
+                            enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
+                            enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+                        }
+                        direction_to_player_strict_normal := player_pos - enemy.pos;
+                        final_direction_normal := direction_to_player_strict_normal;
+                        dist_sq_to_player_normal := m.len_sq_vec2(direction_to_player_strict_normal);
+                        if dist_sq_to_player_normal > 0.001 {
+                            normalized_strict_direction_normal := m.norm_vec2(direction_to_player_strict_normal);
+                            final_direction_normal = normalized_strict_direction_normal + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+                        }
+                        if dist_sq_to_player_normal > 0.00001 {
+                            normalized_final_direction_normal := m.norm_vec2(final_direction_normal);
+                            enemy.vel = normalized_final_direction_normal * ENEMY_SLOWBOY_SPEED;
+                        } else if m.len_sq_vec2(direction_to_player_strict_normal) > 0.00001 {
+                             enemy.vel = m.norm_vec2(direction_to_player_strict_normal) * ENEMY_SLOWBOY_SPEED;
+                        } else { enemy.vel = m.vec2_zero(); }
+                    }
+                }
+            } else if enemy.type == .GRUNT {
+                 // Normal effect_params for Grunt
+                effect_params_x = 0.0;
+                effect_params_y = 0.0; 
+                effect_params_z = 1.0; 
+                effect_params_w = 1.0;
+                // Standard Grunt movement logic
+                enemy.wander_timer -= dt;
+                if enemy.wander_timer <= 0.0 {
+                    new_wander_angle := rand.float32() * m.TAU;
+                    enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
+                    enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+                }
+                direction_to_player_strict_grunt := player_pos - enemy.pos;
+                final_direction_grunt := direction_to_player_strict_grunt;
+                dist_sq_to_player_grunt := m.len_sq_vec2(direction_to_player_strict_grunt);
+                if dist_sq_to_player_grunt > 0.001 {
+                    normalized_strict_direction_grunt := m.norm_vec2(direction_to_player_strict_grunt);
+                    final_direction_grunt = normalized_strict_direction_grunt + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+                }
+                if dist_sq_to_player_grunt > 0.00001 {
+                    normalized_final_direction_grunt := m.norm_vec2(final_direction_grunt);
+                    enemy.vel = normalized_final_direction_grunt * ENEMY_GRUNT_SPEED;
+                } else if m.len_sq_vec2(direction_to_player_strict_grunt) > 0.00001 {
+                     enemy.vel = m.norm_vec2(direction_to_player_strict_grunt) * ENEMY_GRUNT_SPEED;
+                } else { enemy.vel = m.vec2_zero(); }
             }
-            if dist_sq_to_player > 0.00001 {
-                normalized_final_direction := m.norm_vec2(final_direction);
-                // Speed depends on type
-                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = normalized_final_direction * current_speed;
-            } else if m.len_sq_vec2(direction_to_player_strict) > 0.00001 {
-                current_speed : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = m.norm_vec2(direction_to_player_strict) * current_speed;
-            } else { enemy.vel = m.vec2_zero(); }
-            enemy.pos += enemy.vel * dt;
+        }
+        
+        if !has_updated_pos_for_charge_bounce {
+            enemy.pos += enemy.vel * dt; 
         }
 
         // Common rotation and instancing
@@ -1043,7 +1238,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             inst := &state.enemy_instance_data[live_enemy_count];
             inst.instance_pos = enemy.pos;
             inst.instance_main_rotation = enemy.rotation;
-            inst.instance_visual_scale = current_visual_scale_for_shader;
+            inst.instance_visual_scale = current_visual_scale_for_shader * 3.0;
             inst.instance_color = enemy.color;
             inst.instance_effect_params = {effect_params_x, effect_params_y, effect_params_z, effect_params_w};
             // Set enemy type for shader (0.0 for Grunt, 1.0 for SlowBoy)
@@ -1141,12 +1336,21 @@ frame :: proc "c" () {
     if state.player_pos.y < bounce_min_y { state.player_pos.y = bounce_min_y; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.y > bounce_max_y { state.player_pos.y = bounce_max_y; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     
-    // --- Enemy Spawning ---
-    state.enemy_spawn_timer -= delta_time
-    if state.enemy_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect 
-        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos) 
-        state.enemy_spawn_timer = ENEMY_SPAWN_INTERVAL + rand.float32_range(-ENEMY_SPAWN_INTERVAL*0.2, ENEMY_SPAWN_INTERVAL*0.2) 
+    // --- Enemy Spawning (New Logic) ---
+    // --- Grunt Spawning ---
+    state.grunt_spawn_timer -= delta_time;
+    if state.grunt_spawn_timer <= 0.0 {
+        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
+        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .GRUNT);
+        state.grunt_spawn_timer = 1.0; 
+    }
+
+    // --- SlowBoy Spawning ---
+    state.slowboy_spawn_timer -= delta_time;
+    if state.slowboy_spawn_timer <= 0.0 {
+        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
+        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
+        state.slowboy_spawn_timer = 5.0; 
     }
 
     // --- Update Systems ---
