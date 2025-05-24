@@ -60,7 +60,7 @@ void main() {
         float star_alpha_for_core = smoothstep(star_aa, 0.0, star_dist);
 
                                          
-        float glow_spread = 0.3; 
+        float glow_spread = 0.18; 
         float glow_intensity_factor = 0.85; 
 
         float glow_alpha_calc = smoothstep(star_aa + glow_spread, star_aa, star_dist) * glow_intensity_factor;
