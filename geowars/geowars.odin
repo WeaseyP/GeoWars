@@ -78,10 +78,10 @@ ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
 ENEMY_SLOWBOY_SPEED :: f32(0.15)
 ENEMY_SLOWBOY_MAX_HP :: 10
 // --- SlowBoy Attack Constants ---
-SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.7; // Example range, 40% of screen half-height
+SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; // UPDATED
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
-SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.4;
-SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 1.0/2.0;
+SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; // UPDATED
+SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; // UPDATED
 SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; // Multiplier for PLAYER_MAX_SPEED
 SLOWBOY_ATTACK_DAMAGE :: 1;
 // --- Common Enemy Constants ---
@@ -271,7 +271,8 @@ state: struct {
     enemies: [MAX_ENEMIES]Enemy, enemy_instance_data: [MAX_ENEMIES]Enemy_Instance_Data,
     enemy_instance_vbo: sg.Buffer, enemy_bind: sg.Bindings,
     next_enemy_index: int, num_active_enemies: int,
-    enemy_spawn_timer: f32, 
+    grunt_spawn_timer: f32, // UPDATED
+    slowboy_spawn_timer: f32, // UPDATED
     
 }
 
@@ -373,8 +374,11 @@ init :: proc "c" () {
     state.current_rmb_ammo_charges = 0; // Start with 0 charges, or MAX_RMB_AMMO_CHARGES for full
     state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL/10; // Timer for the first charge
 
+    // Initialize new enemy spawn timers
+    state.grunt_spawn_timer = 1.0; 
+    state.slowboy_spawn_timer = 5.0; 
 
-    state.enemy_spawn_timer = rand.float32_range(2.0, 3.0)
+    // state.enemy_spawn_timer = rand.float32_range(2.0, 3.0) // REMOVED
     fmt.printf("--- Init Complete ---\n")
 }
 
@@ -875,7 +879,7 @@ emit_enemy :: proc(enemy_data: Enemy) {
     state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
-spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2) {
+spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: EnemyType) { // MODIFIED SIGNATURE
     context = runtime.default_context()
     start_pos: m.vec2
     valid_spawn_found := false
@@ -902,9 +906,8 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
 
     enemy_to_spawn: Enemy
 
-    // Randomly decide enemy type
-    spawn_rng := rand.float32()
-    if spawn_rng < 0.7 { // 70% chance to spawn GRUNT
+    // MODIFIED: Direct type assignment based on parameter
+    if type_to_spawn == .GRUNT {
         base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
         grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
         enemy_to_spawn = Enemy {
@@ -918,16 +921,16 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             rotation = rand.float32() * m.TAU, 
             angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED,
             hp = ENEMY_GRUNT_MAX_HP, 
-            type = .GRUNT,
+            type = .GRUNT, // Explicitly set type
             active = false, 
             current_wander_vector = initial_wander_vector,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
             is_dying = false,
             dying_timer = 0.0,
             death_rect_offset = 0.0,
-            death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION, // Initialize for Grunt
+            death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION,
         }
-    } else { // 30% chance to spawn SLOWBOY
+    } else if type_to_spawn == .SLOWBOY {
         slowboy_color_initial := m.vec4{0.3, 0.7, 0.9, ENEMY_BASE_ALPHA} // Light blue
         enemy_to_spawn = Enemy {
             pos = start_pos, 
@@ -935,28 +938,29 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             color = slowboy_color_initial, 
             target_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_SLOWBOY_GLOW_CANVAS_SF, 
             current_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
-            grow_timer = ENEMY_GROW_DURATION, // Can share grow duration or have its own
+            grow_timer = ENEMY_GROW_DURATION,
             is_growing = true,                                             
             rotation = rand.float32() * m.TAU, 
-            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5, // Slower spin for SlowBoy
+            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5,
             hp = ENEMY_SLOWBOY_MAX_HP, 
-            type = .SLOWBOY,
+            type = .SLOWBOY, // Explicitly set type
             active = false, 
-            current_wander_vector = initial_wander_vector, // Can share wander logic or have its own
+            current_wander_vector = initial_wander_vector,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
             is_dying = false,
             dying_timer = 0.0,
             death_rect_offset = 0.0,
             death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION,
-
-            // Initialize SlowBoy attack fields
             is_winding_up_attack = false,
             attack_windup_timer = 0.0,
             has_locked_attack_trajectory = false,
-            attack_charge_target_pos = {0,0}, // Or any suitable default
+            attack_charge_target_pos = {0,0},
             is_charging_attack = false,
-            attack_charge_start_pos = {0,0},  // Or any suitable default
+            attack_charge_start_pos = {0,0},
         }
+    } else {
+        fmt.printf("spawn_enemy: WARNING - Unknown type_to_spawn: %v\n", type_to_spawn);
+        return; // Do not spawn if type is unknown
     }
     emit_enemy(enemy_to_spawn)
 }
@@ -1332,12 +1336,21 @@ frame :: proc "c" () {
     if state.player_pos.y < bounce_min_y { state.player_pos.y = bounce_min_y; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.y > bounce_max_y { state.player_pos.y = bounce_max_y; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     
-    // --- Enemy Spawning ---
-    state.enemy_spawn_timer -= delta_time
-    if state.enemy_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect 
-        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos) 
-        state.enemy_spawn_timer = ENEMY_SPAWN_INTERVAL + rand.float32_range(-ENEMY_SPAWN_INTERVAL*0.2, ENEMY_SPAWN_INTERVAL*0.2) 
+    // --- Enemy Spawning (New Logic) ---
+    // --- Grunt Spawning ---
+    state.grunt_spawn_timer -= delta_time;
+    if state.grunt_spawn_timer <= 0.0 {
+        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
+        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .GRUNT);
+        state.grunt_spawn_timer = 1.0; 
+    }
+
+    // --- SlowBoy Spawning ---
+    state.slowboy_spawn_timer -= delta_time;
+    if state.slowboy_spawn_timer <= 0.0 {
+        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
+        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
+        state.slowboy_spawn_timer = 5.0; 
     }
 
     // --- Update Systems ---
