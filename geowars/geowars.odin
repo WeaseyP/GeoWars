@@ -78,10 +78,10 @@ ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
 ENEMY_SLOWBOY_SPEED :: f32(0.15)
 ENEMY_SLOWBOY_MAX_HP :: 10
 // --- SlowBoy Attack Constants ---
-SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.4; // Example range, 40% of screen half-height
+SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.7; // Example range, 40% of screen half-height
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
 SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.4;
-SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 1.0/3.0;
+SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 1.0/2.0;
 SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; // Multiplier for PLAYER_MAX_SPEED
 SLOWBOY_ATTACK_DAMAGE :: 1;
 // --- Common Enemy Constants ---
@@ -969,6 +969,8 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         if !state.enemies[i].active { continue }
         enemy := &state.enemies[i]
 
+        has_updated_pos_for_charge_bounce := false; // <<< NEW FLAG
+
         current_visual_scale_for_shader: f32
         effect_params_x: f32 = 0.0; // is_dying
         effect_params_y: f32 = 0.0; // death_rect_offset
@@ -1013,6 +1015,35 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             effect_params_w = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION; 
             
             current_visual_scale_for_shader = enemy.current_size; 
+
+            // WINDUP LOGIC
+            enemy.attack_windup_timer -= dt;
+            if enemy.attack_windup_timer <= SLOWBOY_ATTACK_LOCKON_TIME_REMAINING && !enemy.has_locked_attack_trajectory {
+                enemy.attack_charge_target_pos = player_pos; // player_pos is available in this function
+                enemy.has_locked_attack_trajectory = true;
+            }
+            if enemy.attack_windup_timer <= 0.0 {
+                enemy.is_winding_up_attack = false;
+                enemy.is_charging_attack = true;
+                enemy.attack_charge_start_pos = enemy.pos;
+                
+                charge_direction_vec := enemy.attack_charge_target_pos - enemy.attack_charge_start_pos;
+                if m.len_sq_vec2(charge_direction_vec) > 0.0001 { // Avoid normalization of zero vector
+                    charge_direction_vec = m.norm_vec2(charge_direction_vec);
+                } else {
+                    // Fallback direction if target is same as start (e.g., player didn't move)
+                    // Default to moving "forward" relative to current orientation or a default like {0,1}
+                    // For simplicity, let's use a default if no player velocity either.
+                    // A better fallback might be based on player's last known movement or enemy's current facing.
+                    // Given the context, if player is at the exact same spot, a small nudge or default direction.
+                    // We can use player's current direction if available, or a default.
+                    // The problem statement implies player_pos is the target, so this case is rare.
+                    // If player is somehow exactly on top of enemy start, pick a default.
+                    charge_direction_vec = m.vec2{0, 1}; // Default direction (e.g., upwards)
+                }
+                enemy.vel = charge_direction_vec * PLAYER_MAX_SPEED * SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR;
+                enemy.angular_vel = 0; // Stop spinning during charge
+            }
         
         } else if enemy.is_growing {
             effect_params_x = 0.0; 
@@ -1088,17 +1119,50 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                  // Note: enemy.is_winding_up_attack is handled by the `else if` block above.
                  // So, this code runs if the SlowBoy is NOT winding up.
                 player_dist_sq := m.dist_sq_vec2(enemy.pos, player_pos);
-                if enemy.is_charging_attack { 
-                    // effect_params are already set to normal for SlowBoy for the charging phase.
-                    charge_distance_world_units: f32 = ORTHO_HEIGHT * 2.0 * SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION; // Ensure 2.0 is f32
+                if enemy.is_charging_attack {
+                    has_updated_pos_for_charge_bounce = true; // Mark that this SlowBoy's position update is handled here
+
+                    // --- Screen Boundary Calculations ---
+                    aspect_ratio := sapp.widthf() / sapp.heightf();
+                    current_ortho_width := ORTHO_HEIGHT * aspect_ratio;
+                    enemy_half_size := enemy.current_size * 0.5;
+
+                    min_x := -current_ortho_width + enemy_half_size;
+                    max_x :=  current_ortho_width - enemy_half_size;
+                    min_y := -ORTHO_HEIGHT + enemy_half_size;
+                    max_y :=  ORTHO_HEIGHT - enemy_half_size;
+
+                    // --- Position Update (specific for charging SlowBoy) ---
+                    enemy.pos += enemy.vel * dt;
+
+                    // --- Bounce Logic ---
+                    if enemy.pos.x < min_x {
+                        enemy.pos.x = min_x;
+                        enemy.vel.x *= -1;
+                    } else if enemy.pos.x > max_x {
+                        enemy.pos.x = max_x;
+                        enemy.vel.x *= -1;
+                    }
+
+                    if enemy.pos.y < min_y {
+                        enemy.pos.y = min_y;
+                        enemy.vel.y *= -1;
+                    } else if enemy.pos.y > max_y {
+                        enemy.pos.y = max_y;
+                        enemy.vel.y *= -1;
+                    }
+                    
+                    // --- Original Charge Distance Check ---
+                    charge_distance_world_units: f32 = ORTHO_HEIGHT * 2.0 * SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION;
                     charge_distance_sq := charge_distance_world_units * charge_distance_world_units;
+                    
                     if m.dist_sq_vec2(enemy.pos, enemy.attack_charge_start_pos) >= charge_distance_sq {
                         enemy.is_charging_attack = false;
-                        enemy.vel = {0,0}; 
+                        enemy.vel = {0,0}; // Stop movement
                     }
                 } else { // SLOWBOY IS ALIVE, NOT GROWING, NOT WINDING, NOT CHARGING
                     // effect_params are already set to normal for SlowBoy.
-                    if player_dist_sq < (SLOWBOY_ATTACK_DETECT_RANGE * SLOWBOY_ATTACK_DETECT_RANGE) {
+                    if player_dist_sq < (SLOWBOY_ATTACK_DETECT_RANGE * SLOWBOY_ATTACK_DETECT_RANGE) && !enemy.is_winding_up_attack && !enemy.is_charging_attack {
                         enemy.is_winding_up_attack = true;
                         enemy.attack_windup_timer = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION;
                         enemy.has_locked_attack_trajectory = false;
@@ -1158,7 +1222,9 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             }
         }
         
-        enemy.pos += enemy.vel * dt; 
+        if !has_updated_pos_for_charge_bounce {
+            enemy.pos += enemy.vel * dt; 
+        }
 
         // Common rotation and instancing
         if enemy.rotation > m.TAU { enemy.rotation -= m.TAU; }

@@ -525,17 +525,40 @@ void main() {
         vec3 color_yellow = vec3(1.0, 1.0, 0.0);
         vec3 color_red = vec3(1.0, 0.0, 0.0);
         float transition = 0.5 + 0.5 * sin(tick * 0.8); 
-        vec3 slowboy_color = mix(color_yellow, color_red, transition);
+        vec3 slowboy_color_animated = mix(color_yellow, color_red, transition);
+        vec3 slowboy_color = slowboy_color_animated; // Default to animated color
+
+        // Check for windup state
+        bool is_winding_up = (enemy_effect_params_fs.y == 1.0);
+        if (is_winding_up) {
+            float total_windup_duration = enemy_effect_params_fs.w;
+            float current_windup_timer = enemy_effect_params_fs.z;
+            // Calculate windup_progress: (total - remaining) / total
+            float windup_progress = clamp((total_windup_duration - current_windup_timer) / total_windup_duration, 0.0, 1.0);
+            
+            vec3 color_white = vec3(1.0, 1.0, 1.0);
+            slowboy_color = mix(slowboy_color_animated, color_white, windup_progress);
+        }
 
         vec3 final_combined_rgb = slowboy_color * star_alpha_for_core + slowboy_color * glow_alpha_calc;
         float final_combined_alpha_shape = clamp(star_alpha_for_core + glow_alpha_calc, 0.0, 1.0);
 
         float current_final_alpha = final_combined_alpha_shape * enemy_color_out_fs.a;
         
+        // Dying effect is handled separately and should override windup color if active.
+        // The current structure implies is_dying_effect (effect_params.x) and windup_effect (effect_params.y)
+        // are mutually exclusive states in terms of shader parameters for primary effect.
+        // If is_dying_effect is true, the color would be determined by that path,
+        // however, SlowBoy's dying path is not explicitly different in color yet, but alpha is affected.
         float is_dying_effect = enemy_effect_params_fs.x;
-        float overall_dying_alpha_mult = enemy_effect_params_fs.w;
         if (is_dying_effect > 0.5) {
+            float overall_dying_alpha_mult = enemy_effect_params_fs.w; // This is overall_dying_alpha_multiplier
             current_final_alpha *= overall_dying_alpha_mult;
+            // If dying, the color should probably not be the windup color.
+            // However, the instructions are to modify the color based on windup,
+            // and the current structure doesn't have a separate color path for SlowBoy dying.
+            // So, if it's dying AND was winding up, it might flash white briefly before fading.
+            // This seems acceptable given the current structure.
         }
 
         frag_color = vec4(final_combined_rgb, current_final_alpha);
