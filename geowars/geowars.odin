@@ -88,8 +88,8 @@ ENEMY_BASE_ALPHA :: 0.65
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
 ENEMY_GRUNT_MAX_HP :: 2
-ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
-ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
+ENEMY_DEATH_ANIM_DURATION :: 3.0  // Duration of the splitting/shrinking animation
+ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.5 // How fast the two parts separate
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
 ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
 
@@ -1043,7 +1043,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             inst := &state.enemy_instance_data[live_enemy_count];
             inst.instance_pos = enemy.pos;
             inst.instance_main_rotation = enemy.rotation;
-            inst.instance_visual_scale = current_visual_scale_for_shader;
+            inst.instance_visual_scale = current_visual_scale_for_shader * 3.0;
             inst.instance_color = enemy.color;
             inst.instance_effect_params = {effect_params_x, effect_params_y, effect_params_z, effect_params_w};
             // Set enemy type for shader (0.0 for Grunt, 1.0 for SlowBoy)

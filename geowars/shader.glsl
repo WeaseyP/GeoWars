@@ -501,6 +501,7 @@ float sdf_star(vec2 uv, int points, float inner_radius_factor, float outer_radiu
 
 void main() {
     vec2 uv_centered = enemy_uv_out_fs - vec2(0.5);
+    const float enemy_visual_scale_on_quad = 3.0;
 
     // --- SlowBoy Rendering Path ---
     if (v_enemy_type_fs > 0.5) { // Assuming 1.0 for SlowBoy
@@ -509,14 +510,14 @@ void main() {
         float star_base_render_radius = 0.45; 
         float effective_sdf_outer_radius = star_base_render_radius / max(1.0, glow_canvas_scale_factor);
 
-        float star_dist = sdf_star(uv_centered, 5, 0.4, effective_sdf_outer_radius);
+        float star_dist = sdf_star(uv_centered * enemy_visual_scale_on_quad, 5, 0.4, effective_sdf_outer_radius);
         
         float star_aa = 0.025; // Anti-aliasing for the star core
 
         float star_alpha_for_core = smoothstep(star_aa, 0.0, star_dist);
 
         // User-specified glow parameters
-        float glow_spread = 0.18; 
+        float glow_spread = 0.3; 
         float glow_intensity_factor = 0.85; 
 
         float glow_alpha_calc = smoothstep(star_aa + glow_spread, star_aa, star_dist) * glow_intensity_factor;
@@ -593,7 +594,8 @@ void main() {
     float internal_yaw_speed = 1.2;
 
     // --- Rectangle 1 ---
-    vec2 uv1_transformed = uv_centered;
+    vec2 base_uv1_for_grunt = uv_centered * enemy_visual_scale_on_quad;
+    vec2 uv1_transformed = base_uv1_for_grunt;
     if (is_dying > 0.5) {
         uv1_transformed.y -= death_offset_uv * 0.5;
     }
@@ -605,7 +607,8 @@ void main() {
     float alpha_sdf1 = smoothstep(aa_sdf_space, 0.0, dist1); // Use new AA
 
     // --- Rectangle 2 ---
-    vec2 uv2_transformed = uv_centered;
+    vec2 base_uv2_for_grunt = uv_centered * enemy_visual_scale_on_quad;
+    vec2 uv2_transformed = base_uv2_for_grunt;
      if (is_dying > 0.5) {
         uv2_transformed.y += death_offset_uv * 0.5;
     }
