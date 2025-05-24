@@ -424,12 +424,14 @@ layout(location=3) in float instance_main_rotation_vs_in;
 layout(location=4) in float instance_visual_scale_vs_in;   // This will be the enemy's current world size
 layout(location=5) in vec4 instance_color_vs_in;      
 layout(location=6) in vec4 instance_effect_params_vs_in; 
+layout(location=7) in float instance_enemy_type_vs_in; // <<< NEW: For enemy type
 
 // Outputs to fragment shader
 out vec4 enemy_color_out_fs;
 out vec2 enemy_uv_out_fs;
 out vec4 enemy_effect_params_fs; 
 out float enemy_visual_scale_fs_out;
+out float v_enemy_type_fs; // <<< NEW: To pass enemy type to fragment shader
 
 // main() now takes NO parameters
 void main() {
@@ -451,6 +453,7 @@ void main() {
     enemy_uv_out_fs = quad_uv_in; 
     enemy_effect_params_fs = instance_effect_params_vs_in;
     enemy_visual_scale_fs_out = instance_visual_scale_vs_in; 
+    v_enemy_type_fs = instance_enemy_type_vs_in; // <<< Use the new attribute
 }
 @end
 @fs fs_enemy
@@ -458,10 +461,13 @@ layout(binding=1) uniform enemy_fs_params { float tick; };
 
 in vec4 enemy_color_out_fs; 
 in vec2 enemy_uv_out_fs;    
-in vec4 enemy_effect_params_fs; // .x = is_dying, .y = death_rect_offset
+in vec4 enemy_effect_params_fs; // .x=is_dying, .y=death_rect_offset, .z=part_scale_mult/glow_canvas_sf, .w=overall_dying_alpha
 in float enemy_visual_scale_fs_out;  // Current overall WORLD size of the enemy (name changed)
+in float v_enemy_type_fs; // <<< NEW: Received enemy type from VS
 
 out vec4 frag_color;
+
+const float PI = 3.14159265359;
 
 mat2 rotate2d(float angle) {
     float s = sin(angle);
@@ -474,9 +480,97 @@ float sdf_rectangle(vec2 p, vec2 half_dims) {
     return length(max(d, vec2(0.0))) + min(max(d.x, d.y), 0.0);
 }
 
+// Modified sdf_star to accept outer_radius_param
+float sdf_star(vec2 uv, int points, float inner_radius_factor, float outer_radius_param) {
+    float angle_step = PI / float(points);
+    float angle = atan(uv.y, uv.x);
+    float r = length(uv);
+
+    // Normalize angle to be within one segment of the star
+    float current_angle_segment = mod(angle, 2.0 * angle_step); // As per subtask spec
+    
+    // Determine if it's an outer or inner point of the segment
+    float segment_angle_offset = current_angle_segment - angle_step;
+
+    float inner_radius = outer_radius_param * inner_radius_factor;
+
+    float effective_radius = mix(outer_radius_param, inner_radius, abs(segment_angle_offset) / angle_step);
+    
+    return r - effective_radius;
+}
+
 void main() {
     vec2 uv_centered = enemy_uv_out_fs - vec2(0.5);
+    const float enemy_visual_scale_on_quad = 3.0;
 
+    // --- SlowBoy Rendering Path ---
+    if (v_enemy_type_fs > 0.5) { // Assuming 1.0 for SlowBoy
+        float glow_canvas_scale_factor = enemy_effect_params_fs.z; 
+
+        float star_base_render_radius = 0.45; 
+        float effective_sdf_outer_radius = star_base_render_radius / max(1.0, glow_canvas_scale_factor);
+
+        float star_dist = sdf_star(uv_centered * enemy_visual_scale_on_quad, 5, 0.4, effective_sdf_outer_radius);
+        
+        float star_aa = 0.025; // Anti-aliasing for the star core
+
+        float star_alpha_for_core = smoothstep(star_aa, 0.0, star_dist);
+
+        // User-specified glow parameters
+        float glow_spread = 0.18; 
+        float glow_intensity_factor = 0.85; 
+
+        float glow_alpha_calc = smoothstep(star_aa + glow_spread, star_aa, star_dist) * glow_intensity_factor;
+
+        vec3 color_yellow = vec3(1.0, 1.0, 0.0);
+        vec3 color_red = vec3(1.0, 0.0, 0.0);
+        float transition = 0.5 + 0.5 * sin(tick * 0.8); 
+        vec3 slowboy_color_animated = mix(color_yellow, color_red, transition);
+        vec3 slowboy_color = slowboy_color_animated; // Default to animated color
+
+        // Check for windup state
+        bool is_winding_up = (enemy_effect_params_fs.y == 1.0);
+        if (is_winding_up) {
+            float total_windup_duration = enemy_effect_params_fs.w;
+            float current_windup_timer = enemy_effect_params_fs.z;
+            // Calculate windup_progress: (total - remaining) / total
+            float windup_progress = clamp((total_windup_duration - current_windup_timer) / total_windup_duration, 0.0, 1.0);
+            
+            vec3 color_white = vec3(1.0, 1.0, 1.0);
+            slowboy_color = mix(slowboy_color_animated, color_white, windup_progress);
+        }
+
+        vec3 final_combined_rgb = slowboy_color * star_alpha_for_core + slowboy_color * glow_alpha_calc;
+        float final_combined_alpha_shape = clamp(star_alpha_for_core + glow_alpha_calc, 0.0, 1.0);
+
+        float current_final_alpha = final_combined_alpha_shape * enemy_color_out_fs.a;
+        
+        // Dying effect is handled separately and should override windup color if active.
+        // The current structure implies is_dying_effect (effect_params.x) and windup_effect (effect_params.y)
+        // are mutually exclusive states in terms of shader parameters for primary effect.
+        // If is_dying_effect is true, the color would be determined by that path,
+        // however, SlowBoy's dying path is not explicitly different in color yet, but alpha is affected.
+        float is_dying_effect = enemy_effect_params_fs.x;
+        if (is_dying_effect > 0.5) {
+            float overall_dying_alpha_mult = enemy_effect_params_fs.w; // This is overall_dying_alpha_multiplier
+            current_final_alpha *= overall_dying_alpha_mult;
+            // If dying, the color should probably not be the windup color.
+            // However, the instructions are to modify the color based on windup,
+            // and the current structure doesn't have a separate color path for SlowBoy dying.
+            // So, if it's dying AND was winding up, it might flash white briefly before fading.
+            // This seems acceptable given the current structure.
+        }
+
+        frag_color = vec4(final_combined_rgb, current_final_alpha);
+
+        if (frag_color.a < 0.01) {
+            discard;
+        }
+        return; 
+    }
+
+    // --- Grunt Rendering Path (existing logic) ---
+    float aa_sdf_space; // Defined locally for Grunt
     float is_dying = enemy_effect_params_fs.x;
     float death_offset_world_units = enemy_effect_params_fs.y;
     float current_part_scale_multiplier = enemy_effect_params_fs.z;
@@ -511,7 +605,7 @@ void main() {
     // `aa` is the transition width for smoothstep. It should be a small fraction of the shape's feature size.
     // The feature size here is related to `rectangle_half_dims_uv`.
     // Let `aa` be a constant fraction of the smallest dimension of the (potentially shrunken) rectangle.
-    float aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.1; // e.g., 10% of smallest half-dim
+    aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.1; // e.g., 10% of smallest half-dim
     aa_sdf_space = max(aa_sdf_space, 0.0001); // Ensure it's not too small
 
     // Convert world separation offset to UV separation offset
@@ -520,15 +614,15 @@ void main() {
         death_offset_uv = death_offset_world_units / enemy_visual_scale_fs_out;
     }
 
-    float pi = 3.14159265358979323846;
     float internal_yaw_speed = 1.2;
 
     // --- Rectangle 1 ---
-    vec2 uv1_transformed = uv_centered;
+    vec2 base_uv1_for_grunt = uv_centered * enemy_visual_scale_on_quad;
+    vec2 uv1_transformed = base_uv1_for_grunt;
     if (is_dying > 0.5) {
         uv1_transformed.y -= death_offset_uv * 0.5;
     }
-    float internal_rotation1 = (pi / 4.0) + tick * internal_yaw_speed;
+    float internal_rotation1 = (PI / 4.0) + tick * internal_yaw_speed;
     vec2 uv1_rotated = rotate2d(internal_rotation1) * uv1_transformed;
     float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims_uv);
     vec3 color1_tip = enemy_color_out_fs.rgb * 1.6 + vec3(0.3, 0.2, 0.3);
@@ -536,11 +630,12 @@ void main() {
     float alpha_sdf1 = smoothstep(aa_sdf_space, 0.0, dist1); // Use new AA
 
     // --- Rectangle 2 ---
-    vec2 uv2_transformed = uv_centered;
+    vec2 base_uv2_for_grunt = uv_centered * enemy_visual_scale_on_quad;
+    vec2 uv2_transformed = base_uv2_for_grunt;
      if (is_dying > 0.5) {
         uv2_transformed.y += death_offset_uv * 0.5;
     }
-    float internal_rotation2 = (-pi / 4.0) - tick * internal_yaw_speed;
+    float internal_rotation2 = (-PI / 4.0) - tick * internal_yaw_speed;
     vec2 uv2_rotated = rotate2d(internal_rotation2) * uv2_transformed;
     float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims_uv);
     vec3 color2_tip = enemy_color_out_fs.rgb * 0.7 - vec3(0.1, 0.0, 0.1);

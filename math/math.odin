@@ -34,6 +34,8 @@ len_vec3 :: proc(v: vec3) -> f32 { return math.sqrt(dot(v, v)) }
 norm :: proc {
     norm_vec3,
 }
+
+
 norm_vec3 :: proc(v: vec3) -> vec3 {
     l := len(v)
     if (l != 0) {
