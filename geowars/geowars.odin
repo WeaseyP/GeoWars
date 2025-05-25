@@ -46,7 +46,7 @@ LMB_HIT_WHOOSH_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 10 // 0.1 seconds
 LMB_HIT_WHOOSH_AMPLITUDE :: 0.4
 
 LMB_KILL_EXPLOSION_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 2 // 0.5 seconds
-LMB_KILL_EXPLOSION_AMPLITUDE :: 0.7
+LMB_KILL_EXPLOSION_AMPLITUDE :: 0.5
 
 // Global PCM data buffers and Miniaudio buffer objects for LMB hit sounds
 lmb_hit_whoosh_pcm_data: [LMB_HIT_WHOOSH_DURATION_FRAMES]f32;
@@ -65,10 +65,11 @@ ENEMY_HIT_SOUND_AMPLITUDE :: 0.35
 // Enemy Death Sound Definitions
 ENEMY_DEATH_SOUND_DURATION_MS :: 200
 ENEMY_DEATH_SOUND_FRAMES :: LMB_SOUND_SAMPLE_RATE * ENEMY_DEATH_SOUND_DURATION_MS / 1000
-ENEMY_DEATH_SOUND_NOISE_AMPLITUDE :: 0.4 // For a short burst of noise
-ENEMY_DEATH_SOUND_SINE_START_FREQ :: 400.0
-ENEMY_DEATH_SOUND_SINE_END_FREQ :: 100.0
-ENEMY_DEATH_SOUND_SINE_AMPLITUDE :: 0.3
+ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES :: ENEMY_DEATH_SOUND_FRAMES / 4 // Duration of the initial noise burst
+ENEMY_DEATH_SOUND_NOISE_AMPLITUDE :: 0.25 // For a short burst of noise
+ENEMY_DEATH_SOUND_SINE_START_FREQ :: 250.0
+ENEMY_DEATH_SOUND_SINE_END_FREQ :: 50.0
+ENEMY_DEATH_SOUND_SINE_AMPLITUDE :: 0.20
 
 // Global PCM data buffers and Miniaudio buffer objects for enemy sounds
 enemy_hit_sound_pcm_data: [ENEMY_HIT_SOUND_FRAMES]f32;
@@ -140,7 +141,7 @@ ENEMY_GRUNT_SPEED :: f32(0.5)
 ENEMY_SLOWBOY_BASE_SCALE :: 0.25
 ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
 ENEMY_SLOWBOY_SPEED :: f32(0.15)
-ENEMY_SLOWBOY_MAX_HP :: 10
+ENEMY_SLOWBOY_MAX_HP :: 16
 // --- SlowBoy Attack Constants ---
 SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; // UPDATED
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
@@ -159,7 +160,7 @@ ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7
 ENEMY_BASE_ALPHA :: 0.65           
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
-ENEMY_GRUNT_MAX_HP :: 2
+ENEMY_GRUNT_MAX_HP :: 4
 ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
 GRUNT_DEATH_ANIM_DURATION :: 3.0 
 SLOWBOY_DEATH_ANIM_DURATION :: 1.0
@@ -314,6 +315,10 @@ state: struct {
 
     audio_engine: ma.engine,
     lmb_sound: ma.sound,
+    lmb_hit_sound: ma.sound,
+    lmb_kill_sound: ma.sound,
+    rmb_hit_sound: ma.sound,
+    rmb_kill_sound: ma.sound,
 
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, // Player health
@@ -530,6 +535,16 @@ init :: proc "c" () {
     init_enemy_hit_ab_result := ma.audio_buffer_init_copy(&enemy_hit_ab_config, &enemy_hit_sound_audio_buffer)
     if init_enemy_hit_ab_result == .SUCCESS {
         fmt.printf("--- Enemy Hit audio_buffer initialized. ---\n")
+        sound_flags_rmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+        p_data_source_rmb_hit := (^ma.data_source)(&enemy_hit_sound_audio_buffer);
+        init_rmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_rmb_hit, sound_flags_rmb_hit, nil, &state.rmb_hit_sound);
+        if init_rmb_hit_sound_result == .SUCCESS {
+            ma.sound_set_volume(&state.rmb_hit_sound, ENEMY_HIT_SOUND_AMPLITUDE);
+            fmt.printf("--- Miniaudio rmb_hit_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_HIT_SOUND_AMPLITUDE);
+        } else {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_hit_sound failed! Error: %v\n", init_rmb_hit_sound_result);
+            ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); // Cleanup its buffer
+        }
     } else {
         fmt.eprintf("!!! CRITICAL: Enemy Hit audio_buffer_init_copy failed! Error: %v\n", init_enemy_hit_ab_result)
     }
@@ -537,22 +552,25 @@ init :: proc "c" () {
     // Generate Enemy Death Sound PCM Data
     fmt.printf("--- Generating 'Enemy Death' sound PCM data... ---\n")
     current_phase_enemy_death_sine: f64 = 0.0
-rng_seed: u64 = 12345 // Fixed seed for reproducibility, or use time-based for variation
-r := rand.create(rng_seed) // <--- Is 'r' defined exactly like this?
+    rng_seed: u64 = 12345 // Fixed seed for reproducibility, or use time-based for variation
+    // 1. Create a Default_Random_State
+    death_sound_rng_state := rand.create(rng_seed) 
+    // 2. Create a Random_Generator from this state
+    death_sound_generator := runtime.default_random_generator(&death_sound_rng_state)
 
 
     for i in 0..<ENEMY_DEATH_SOUND_FRAMES {
-        if i < noise_duration_frames {
-            progress_noise := f32(i) / f32(noise_duration_frames)
-            decay_noise := (1.0 - progress_noise) // Linear decay for noise
-            // Ensure decay_noise doesn't go below zero if progress_noise somehow exceeds 1.0
+        if i < ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES { // Ensure this uses the renamed constant if that was part of an earlier fix
+            progress_noise := f32(i) / f32(ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES) // Ensure this uses the renamed constant
+            decay_noise := (1.0 - progress_noise) 
             decay_noise = math.max(0.0, decay_noise) 
-            random_sample := (rand.float32(r) * 2.0 - 1.0) // Generate [-1, 1]
+            // 3. Pass the new generator to rand.float32()
+            random_sample := (rand.float32(death_sound_generator) * 2.0 - 1.0) // Generate [-1, 1]
             enemy_death_sound_pcm_data[i] = random_sample * ENEMY_DEATH_SOUND_NOISE_AMPLITUDE * decay_noise
         } else {
             // Sine wave for the remainder
-            sine_progress_frames := i - noise_duration_frames
-            total_sine_frames := ENEMY_DEATH_SOUND_FRAMES - noise_duration_frames
+            sine_progress_frames := i - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES
+            total_sine_frames := ENEMY_DEATH_SOUND_FRAMES - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES
             progress_sine := f64(sine_progress_frames) / f64(total_sine_frames)
 
             // Amplitude envelope for sine (decay)
@@ -579,9 +597,121 @@ r := rand.create(rng_seed) // <--- Is 'r' defined exactly like this?
     init_enemy_death_ab_result := ma.audio_buffer_init_copy(&enemy_death_ab_config, &enemy_death_sound_audio_buffer)
     if init_enemy_death_ab_result == .SUCCESS {
         fmt.printf("--- Enemy Death audio_buffer initialized. ---\n")
+        sound_flags_rmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+        p_data_source_rmb_kill := (^ma.data_source)(&enemy_death_sound_audio_buffer);
+        init_rmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_rmb_kill, sound_flags_rmb_kill, nil, &state.rmb_kill_sound);
+        if init_rmb_kill_sound_result == .SUCCESS {
+            ma.sound_set_volume(&state.rmb_kill_sound, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
+            fmt.printf("--- Miniaudio rmb_kill_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
+        } else {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_kill_sound failed! Error: %v\n", init_rmb_kill_sound_result);
+            ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); // Cleanup its buffer
+        }
     } else {
         fmt.eprintf("!!! CRITICAL: Enemy Death audio_buffer_init_copy failed! Error: %v\n", init_enemy_death_ab_result)
     }
+
+        // Generate LMB Hit Whoosh Sound PCM Data
+        fmt.printf("--- Generating 'LMB Hit Whoosh' sound PCM data... ---\n")
+        lmb_hit_rng_seed: u64 = 67890 // Different seed
+        lmb_hit_rng_state := rand.create(lmb_hit_rng_seed)
+        lmb_hit_generator := runtime.default_random_generator(&lmb_hit_rng_state)
+        for i in 0..<LMB_HIT_WHOOSH_DURATION_FRAMES {
+            progress := f32(i) / f32(LMB_HIT_WHOOSH_DURATION_FRAMES)
+            amplitude_envelope: f32
+            attack_time_whoosh : f32 = 0.05 // Very quick attack
+            decay_time_whoosh : f32 = 0.95 // Rest is decay
+            
+            if progress < attack_time_whoosh {
+                amplitude_envelope = progress / attack_time_whoosh
+            } else {
+                amplitude_envelope = 1.0 - (progress - attack_time_whoosh) / decay_time_whoosh
+            }
+            amplitude_envelope = math.max(0.0, amplitude_envelope) // Ensure non-negative
+            
+            random_sample := (rand.float32(lmb_hit_generator) * 2.0 - 1.0) // White noise
+            lmb_hit_whoosh_pcm_data[i] = random_sample * LMB_HIT_WHOOSH_AMPLITUDE * amplitude_envelope
+        }
+        fmt.printf("--- 'LMB Hit Whoosh' sound PCM data generated. ---\n")
+
+        // Initialize Miniaudio audio_buffer for lmb_hit_whoosh_sound
+        lmb_hit_whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_HIT_WHOOSH_DURATION_FRAMES), rawptr(&lmb_hit_whoosh_pcm_data[0]), nil)
+        init_lmb_hit_whoosh_ab_result := ma.audio_buffer_init_copy(&lmb_hit_whoosh_ab_config, &lmb_hit_whoosh_audio_buffer)
+        if init_lmb_hit_whoosh_ab_result == .SUCCESS {
+            fmt.printf("--- LMB Hit Whoosh audio_buffer initialized. ---\n")
+            sound_flags_lmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+            p_data_source_lmb_hit := (^ma.data_source)(&lmb_hit_whoosh_audio_buffer);
+            init_lmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_hit, sound_flags_lmb_hit, nil, &state.lmb_hit_sound);
+            if init_lmb_hit_sound_result == .SUCCESS {
+                ma.sound_set_volume(&state.lmb_hit_sound, LMB_HIT_WHOOSH_AMPLITUDE);
+                fmt.printf("--- Miniaudio lmb_hit_sound initialized successfully (Volume: %.2f) ---\n", LMB_HIT_WHOOSH_AMPLITUDE);
+            } else {
+                fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_hit_sound failed! Error: %v\n", init_lmb_hit_sound_result);
+                ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); // Cleanup its buffer if sound init fails
+            }
+        } else {
+            fmt.eprintf("!!! CRITICAL: LMB Hit Whoosh audio_buffer_init_copy failed! Error: %v\n", init_lmb_hit_whoosh_ab_result)
+        }
+
+        // Generate LMB Kill Explosion Sound PCM Data
+        fmt.printf("--- Generating 'LMB Kill Explosion' sound PCM data... ---\n")
+        lmb_kill_rng_seed: u64 = 78901 // Different seed
+        lmb_kill_rng_state := rand.create(lmb_kill_rng_seed)
+        lmb_kill_generator := runtime.default_random_generator(&lmb_kill_rng_state)
+        
+        // Explosion: Short noise burst, then a fast decaying low sine wave
+        EXPLOSION_NOISE_FRAMES :: LMB_KILL_EXPLOSION_DURATION_FRAMES / 5 // e.g., 1/5th of duration for noise
+        EXPLOSION_SINE_START_FREQ :: 150.0
+        EXPLOSION_SINE_END_FREQ :: 40.0
+        current_phase_lmb_kill_sine: f64 = 0.0
+
+        for i in 0..<LMB_KILL_EXPLOSION_DURATION_FRAMES {
+            if i < EXPLOSION_NOISE_FRAMES {
+                progress_noise := f32(i) / f32(EXPLOSION_NOISE_FRAMES)
+                decay_noise := (1.0 - progress_noise) * (1.0 - progress_noise) // Faster decay for noise
+                decay_noise = math.max(0.0, decay_noise)
+                random_sample := (rand.float32(lmb_kill_generator) * 2.0 - 1.0)
+                lmb_kill_explosion_pcm_data[i] = random_sample * LMB_KILL_EXPLOSION_AMPLITUDE * decay_noise * 0.7 // Noise part a bit quieter
+            } else {
+                sine_progress_frames := i - EXPLOSION_NOISE_FRAMES
+                total_sine_frames := LMB_KILL_EXPLOSION_DURATION_FRAMES - EXPLOSION_NOISE_FRAMES
+                progress_sine := f64(sine_progress_frames) / f64(total_sine_frames)
+
+                amplitude_sine_decay := math.pow(1.0 - progress_sine, 3.0) // Strong exponential decay
+                amplitude_sine_decay = math.max(0.0, amplitude_sine_decay)
+
+                ratio_sine := EXPLOSION_SINE_END_FREQ / EXPLOSION_SINE_START_FREQ
+                current_freq_sine_f64 := EXPLOSION_SINE_START_FREQ * math.pow(ratio_sine, progress_sine)
+                
+                sample_val_sine_f64 := math.sin(current_phase_lmb_kill_sine)
+                lmb_kill_explosion_pcm_data[i] = f32(sample_val_sine_f64 * amplitude_sine_decay * f64(LMB_KILL_EXPLOSION_AMPLITUDE))
+                
+                current_phase_lmb_kill_sine += (2.0 * f64(math.PI) * current_freq_sine_f64) / f64(LMB_SOUND_SAMPLE_RATE)
+                if current_phase_lmb_kill_sine >= (2.0 * f64(math.PI)) {
+                    current_phase_lmb_kill_sine -= (2.0 * f64(math.PI))
+                }
+            }
+        }
+        fmt.printf("--- 'LMB Kill Explosion' sound PCM data generated. ---\n")
+
+        // Initialize Miniaudio audio_buffer for lmb_kill_explosion_sound
+        lmb_kill_explosion_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_KILL_EXPLOSION_DURATION_FRAMES), rawptr(&lmb_kill_explosion_pcm_data[0]), nil)
+        init_lmb_kill_explosion_ab_result := ma.audio_buffer_init_copy(&lmb_kill_explosion_ab_config, &lmb_kill_explosion_audio_buffer)
+        if init_lmb_kill_explosion_ab_result == .SUCCESS {
+            fmt.printf("--- LMB Kill Explosion audio_buffer initialized. ---\n")
+            sound_flags_lmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+            p_data_source_lmb_kill := (^ma.data_source)(&lmb_kill_explosion_audio_buffer);
+            init_lmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_kill, sound_flags_lmb_kill, nil, &state.lmb_kill_sound);
+            if init_lmb_kill_sound_result == .SUCCESS {
+                ma.sound_set_volume(&state.lmb_kill_sound, LMB_KILL_EXPLOSION_AMPLITUDE);
+                fmt.printf("--- Miniaudio lmb_kill_sound initialized successfully (Volume: %.2f) ---\n", LMB_KILL_EXPLOSION_AMPLITUDE);
+            } else {
+                fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_kill_sound failed! Error: %v\n", init_lmb_kill_sound_result);
+                ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); // Cleanup its buffer
+            }
+        } else {
+            fmt.eprintf("!!! CRITICAL: LMB Kill Explosion audio_buffer_init_copy failed! Error: %v\n", init_lmb_kill_explosion_ab_result)
+        }
 
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
@@ -1078,51 +1208,6 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 	}
 }
 
-// Helper function to play a sound once without needing to manage the ma.sound object externally.
-play_one_shot_sound :: proc(p_engine: ^ma.engine, p_audio_buffer: ^ma.audio_buffer, volume: f32) {
-    context = runtime.default_context()
-    sound_to_play: ma.sound
-
-    // Initialize the sound from the provided audio buffer
-    sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }
-    p_data_source := (^ma.data_source)(p_audio_buffer)
-
-    init_sound_result := ma.sound_init_from_data_source(p_engine, p_data_source, sound_flags, nil, &sound_to_play)
-    if init_sound_result != .SUCCESS {
-        fmt.eprintf("!!! ERROR: play_one_shot_sound - ma.sound_init_from_data_source failed! Error: %v\n", init_sound_result)
-        return // Exit if sound cannot be initialized
-    }
-
-    // Set volume
-    ma.sound_set_volume(&sound_to_play, volume)
-
-    // Seek to beginning (important for replaying sounds)
-    seek_result := ma.sound_seek_to_pcm_frame(&sound_to_play, 0)
-    if seek_result != .SUCCESS {
-        fmt.eprintf("!!! WARNING: play_one_shot_sound - ma.sound_seek_to_pcm_frame failed. Error: %v\n", seek_result)
-        // Proceed to start anyway, but log the warning
-    }
-
-    // Start the sound
-    start_result := ma.sound_start(&sound_to_play)
-    if start_result != .SUCCESS {
-        fmt.eprintf("!!! ERROR: play_one_shot_sound - ma.sound_start failed! Error: %v\n", start_result)
-        // Uninitialize even if start fails, to clean up the initialized sound object
-        ma.sound_uninit(&sound_to_play)
-        return
-    }
-
-    // Immediately uninitialize the sound.
-    // The sound will continue to play to completion as long as the engine is running
-    // and the p_audio_buffer it references remains valid.
-    ma.sound_uninit(&sound_to_play)
-    // If you still want to log, you can't check uninit_result. 
-    // For simplicity, we'll remove the error check for uninit for one-shot sounds,
-    // as failure here is unlikely to be critical and there's no return value to check.
-    // fmt.printf("--- One-shot sound uninitialized (or attempted) ---\n"); // Optional debug log
-    // fmt.printf("--- play_one_shot_sound: Sound played (vol: %.2f) and uninitialized. ---\n", volume) // For debugging
-}
-
 check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
@@ -1158,15 +1243,22 @@ check_RMB_particle_enemy_collisions :: proc() {
                 // RMB particles might do more than 1 damage, or enemy HP might be > 1
                 // So, damage first, then check HP.
                 enemy.hp -= PARTICLE_DAMAGE_VALUE // Assuming PARTICLE_DAMAGE_VALUE is defined (it is, as 1)
+                fmt.printf("RMB Hit: Enemy %p, HP before sound check: %d\n", enemy, enemy.hp);
                 
                 // Play sound based on whether enemy died or was just hit
                 if enemy.hp <= 0 {
                     // Check if it wasn't already dying to play death sound only once
                     if !enemy.is_dying {
-                        play_one_shot_sound(&state.audio_engine, &enemy_death_sound_audio_buffer, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE)
+                        fmt.printf("RMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy, enemy.is_dying);
+                        //play_one_shot_sound(&state.audio_engine, &enemy_death_sound_audio_buffer, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE) // Old call
+                        ma.sound_seek_to_pcm_frame(&state.rmb_kill_sound, 0);
+                        ma.sound_start(&state.rmb_kill_sound);
                     }
                 } else {
-                    play_one_shot_sound(&state.audio_engine, &enemy_hit_sound_audio_buffer, ENEMY_HIT_SOUND_AMPLITUDE)
+                    fmt.printf("RMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy, enemy.hp);
+                    //play_one_shot_sound(&state.audio_engine, &enemy_hit_sound_audio_buffer, ENEMY_HIT_SOUND_AMPLITUDE) // Old call
+                    ma.sound_seek_to_pcm_frame(&state.rmb_hit_sound, 0);
+                    ma.sound_start(&state.rmb_hit_sound);
                 }
 
                 if particle.has_active_sound {
@@ -1223,14 +1315,21 @@ check_LMB_projectile_enemy_collisions :: proc() {
                 proj.active = false    // Projectile is consumed
                 
                 enemy.hp -= LMB_PROJECTILE_DAMAGE; // Apply damage
+                fmt.printf("LMB Hit: Enemy %p, HP before sound check: %d\n", enemy, enemy.hp);
                 // Play sound based on whether enemy died or was just hit
                 if enemy.hp <= 0 {
                     // Check if it wasn't already dying to play death sound only once
                     if !enemy.is_dying {
-                         play_one_shot_sound(&state.audio_engine, &enemy_death_sound_audio_buffer, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE)
+                         fmt.printf("LMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy, enemy.is_dying);
+                         //play_one_shot_sound(&state.audio_engine, &lmb_kill_explosion_audio_buffer, LMB_KILL_EXPLOSION_AMPLITUDE) // Old call
+                         ma.sound_seek_to_pcm_frame(&state.lmb_kill_sound, 0);
+                         ma.sound_start(&state.lmb_kill_sound);
                     }
                 } else {
-                    play_one_shot_sound(&state.audio_engine, &enemy_hit_sound_audio_buffer, ENEMY_HIT_SOUND_AMPLITUDE)
+                    fmt.printf("LMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy, enemy.hp);
+                    //play_one_shot_sound(&state.audio_engine, &lmb_hit_whoosh_audio_buffer, LMB_HIT_WHOOSH_AMPLITUDE) // Old call
+                    ma.sound_seek_to_pcm_frame(&state.lmb_hit_sound, 0);
+                    ma.sound_start(&state.lmb_hit_sound);
                 }
 
                 if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
@@ -1960,6 +2059,20 @@ cleanup :: proc "c" () {
     fmt.printf("--- Enemy Hit audio_buffer uninitialized ---\n")
     ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer)
     fmt.printf("--- Enemy Death audio_buffer uninitialized ---\n")
+
+    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer)
+    fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer)
+    fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
+
+    ma.sound_uninit(&state.lmb_hit_sound);
+    fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n");
+    ma.sound_uninit(&state.lmb_kill_sound);
+    fmt.printf("--- Miniaudio lmb_kill_sound uninitialized ---\n");
+    ma.sound_uninit(&state.rmb_hit_sound);
+    fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n");
+    ma.sound_uninit(&state.rmb_kill_sound);
+    fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n");
 
     // Cleanup Miniaudio engine
     ma.engine_uninit(&state.audio_engine)
