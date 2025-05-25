@@ -6,12 +6,25 @@ import "base:runtime"
 import "core:math"
 import "core:mem"
 import "core:fmt"
+import "core:c"
 import slog "../sokol/log"
 import sg "../sokol/gfx"
 import sapp "../sokol/app"
 import sglue "../sokol/glue"
+import sa "../sokol/audio"
+import ma "../miniaudio"
 import m "../math"
 import rand "core:math/rand"
+
+LMB_SOUND_SAMPLE_RATE :: 44100
+LMB_SOUND_CHANNELS :: 1
+LMB_SOUND_DURATION_MS :: 100
+LMB_SOUND_FRAMES :: LMB_SOUND_SAMPLE_RATE * LMB_SOUND_DURATION_MS / 1000
+LMB_SOUND_START_FREQ :: 1200.0
+LMB_SOUND_END_FREQ :: 400.0
+LMB_SOUND_AMPLITUDE :: 0.5
+lmb_sound_pcm_data: [LMB_SOUND_FRAMES]f32; // Buffer to hold the generated PCM data
+lmb_sound_audio_buffer: ma.audio_buffer; // Miniaudio's wrapper for the PCM data
 
 // =============================================================================
 // START: Package-Level Declarations
@@ -245,6 +258,9 @@ state: struct {
     enemy_vs_params: Enemy_Vs_Params, enemy_fs_params: Enemy_Fs_Params, 
     blackhole_vs_params: Blackhole_Vs_Params, blackhole_fs_params: Blackhole_Fs_Params,
 
+    audio_engine: ma.engine,
+    lmb_sound: ma.sound,
+
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, // Player health
     player_invulnerable_timer: f32,    // Invulnerability timer
@@ -285,6 +301,86 @@ init :: proc "c" () {
     context = runtime.default_context()
     sg.setup({ pipeline_pool_size=12, buffer_pool_size=12, shader_pool_size=12, environment=sglue.environment(), logger={func=slog.func} })
     fmt.printf("--- Init Start ---\n")
+
+    // Sokol Audio Setup
+    sokol_audio_desc := sa.Desc {
+        sample_rate = LMB_SOUND_SAMPLE_RATE, // Use new constant
+        num_channels = LMB_SOUND_CHANNELS,   // Use new constant
+        buffer_frames = 1024, 
+        packet_frames = 0,    
+        num_packets = 0,      
+        stream_userdata_cb = geowars_audio_stream_callback,
+        user_data = nil, 
+    }
+    sa.setup(sokol_audio_desc)
+    if !sa.isvalid() {
+        fmt.eprintf("!!! CRITICAL: Sokol Audio setup failed!\n")
+    } else {
+        fmt.printf("--- Sokol Audio Initialized (Sample Rate: %v, Channels: %v) ---\n", sa.sample_rate(), sa.channels())
+    }
+
+    // Miniaudio Engine Setup
+    engine_config := ma.engine_config_init()
+    engine_config.noDevice = true 
+    engine_config.channels = u32(LMB_SOUND_CHANNELS)   // Use new constant
+    engine_config.sampleRate = u32(LMB_SOUND_SAMPLE_RATE) // Use new constant
+
+    init_result := ma.engine_init(&engine_config, &state.audio_engine)
+    if init_result != .SUCCESS {
+        fmt.eprintf("!!! CRITICAL: Miniaudio engine_init failed! Error: %v\n", init_result)
+    } else {
+        fmt.printf("--- Miniaudio Engine Initialized ---\n")
+    }
+
+    // Generate "Pew" Sound PCM Data
+    fmt.printf("--- Generating 'Pew' sound PCM data... ---\n")
+    current_phase: f64 = 0.0 
+   
+    for i in 0..<LMB_SOUND_FRAMES {
+        progress := f64(i) / f64(LMB_SOUND_FRAMES)
+
+        amplitude: f64
+        attack_time := 0.15 // New, longer attack_time (15% of total duration)
+        if progress < attack_time {
+            amplitude = progress / attack_time
+        } else {
+            amplitude = 1.0 - (progress - attack_time) / (1.0 - attack_time)
+        }
+        amplitude = math.max(0.0, amplitude) 
+
+        ratio := LMB_SOUND_END_FREQ / LMB_SOUND_START_FREQ
+        exponent := progress
+        current_freq_f64 := f64(LMB_SOUND_START_FREQ) * math.pow(f64(ratio), exponent)
+
+        sample_val_f64 := math.sin(current_phase)
+       
+        lmb_sound_pcm_data[i] = f32(sample_val_f64 * amplitude * f64(LMB_SOUND_AMPLITUDE))
+
+        current_phase += (2.0 * f64(math.PI) * current_freq_f64) / f64(LMB_SOUND_SAMPLE_RATE)
+        if current_phase >= (2.0 * f64(math.PI)) {
+            current_phase -= (2.0 * f64(math.PI))
+        }
+    }
+    fmt.printf("--- 'Pew' sound PCM data generated. First sample: %v, Mid sample: %v, Last sample: %v ---\n", lmb_sound_pcm_data[0], lmb_sound_pcm_data[LMB_SOUND_FRAMES/2], lmb_sound_pcm_data[LMB_SOUND_FRAMES-1])
+
+    audio_buffer_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_SOUND_FRAMES), rawptr(&lmb_sound_pcm_data[0]), nil)
+    init_ab_result := ma.audio_buffer_init_copy(&audio_buffer_config, &lmb_sound_audio_buffer) 
+    if init_ab_result != .SUCCESS {
+        fmt.eprintf("!!! CRITICAL: Miniaudio audio_buffer_init_copy for LMB sound failed! Error: %v\n", init_ab_result)
+    } else {
+        fmt.printf("--- Miniaudio audio_buffer initialized for LMB sound ---\n")
+        sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } 
+        p_data_source_for_sound := (^ma.data_source)(&lmb_sound_audio_buffer)
+
+        init_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_for_sound, sound_flags, nil, &state.lmb_sound)
+        if init_sound_result != .SUCCESS {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_sound failed! Error: %v\n", init_sound_result)
+            ma.audio_buffer_uninit(&lmb_sound_audio_buffer); 
+        } else {
+            fmt.printf("--- Miniaudio lmb_sound initialized successfully ---\n")
+        }
+    }
+
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
     state.bind.vertex_buffers[0] = sg.make_buffer({ label="shared-quad-vertices", data=sg.Range{ptr=&vertices[0], size=size_of(vertices)}})
@@ -396,6 +492,10 @@ event :: proc "c" (event: ^sapp.Event) {
     case .MOUSE_MOVE: 
         state.mouse_screen_pos = {event.mouse_x, event.mouse_y}
     }
+}
+
+geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_channels: c.int, user_data: rawptr) {
+    ma.engine_read_pcm_frames(&state.audio_engine, buffer, u64(num_frames), nil)
 }
 
 // --- Particle System ---
@@ -1312,6 +1412,17 @@ frame :: proc "c" () {
 
         if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
             spawn_blackhole_projectile_weapon();
+            // Play click sound
+            seek_result := ma.sound_seek_to_pcm_frame(&state.lmb_sound, 0)
+            if seek_result != .SUCCESS {
+                // Optional: Log warning if seek fails, but proceed to start anyway
+                fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result)
+            }
+            start_result := ma.sound_start(&state.lmb_sound)
+            if start_result != .SUCCESS {
+                // Optional: Log warning if sound start fails
+                fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result)
+            }
             state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
         }
         state.previous_lmb_down = state.lmb_down;
@@ -1425,5 +1536,31 @@ frame :: proc "c" () {
 }
 
 
-cleanup :: proc "c" () { context=runtime.default_context(); sg.shutdown(); }
+cleanup :: proc "c" () { 
+    context=runtime.default_context(); 
+    
+    // Cleanup Miniaudio sound
+    // Check if the sound was successfully initialized before trying to uninit.
+    // (Assuming state.click_sound.pDataSource is not nil if initialized, or similar check.
+    // For now, we'll call uninit directly. If it crashes, we add checks later.)
+    ma.sound_uninit(&state.lmb_sound) 
+    fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
+
+    // Cleanup Miniaudio audio_buffer that holds the click sound's PCM data
+    // This is necessary because ma_audio_buffer_init_copy was used.
+    ma.audio_buffer_uninit(&lmb_sound_audio_buffer) 
+    fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
+
+    // Cleanup Miniaudio engine
+    ma.engine_uninit(&state.audio_engine)
+    fmt.printf("--- Miniaudio engine uninitialized ---\n")
+
+    // Shutdown Sokol Audio
+    if sa.isvalid() { // Check if Sokol Audio was successfully initialized
+        sa.shutdown()
+        fmt.printf("--- Sokol Audio shutdown ---\n")
+    }
+    
+    sg.shutdown(); 
+}
 main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Grunt Collision", icon={sokol_default=true}, logger={func=slog.func} }) }
