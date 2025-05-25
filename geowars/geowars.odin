@@ -536,10 +536,10 @@ init :: proc "c" () {
 
     // Generate Enemy Death Sound PCM Data
     fmt.printf("--- Generating 'Enemy Death' sound PCM data... ---\n")
-    noise_duration_frames := ENEMY_DEATH_SOUND_FRAMES / 5 // First 20% for noise
     current_phase_enemy_death_sine: f64 = 0.0
-    rng_seed: u64 = 12345 // Fixed seed for reproducibility, or use time-based for variation
-    r := rand.create(rng_seed)
+rng_seed: u64 = 12345 // Fixed seed for reproducibility, or use time-based for variation
+r := rand.create(rng_seed) // <--- Is 'r' defined exactly like this?
+
 
     for i in 0..<ENEMY_DEATH_SOUND_FRAMES {
         if i < noise_duration_frames {
