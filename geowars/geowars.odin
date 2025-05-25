@@ -6,12 +6,54 @@ import "base:runtime"
 import "core:math"
 import "core:mem"
 import "core:fmt"
+import "core:c"
 import slog "../sokol/log"
 import sg "../sokol/gfx"
 import sapp "../sokol/app"
 import sglue "../sokol/glue"
+import sa "../sokol/audio"
+import ma "../miniaudio"
 import m "../math"
 import rand "core:math/rand"
+
+LMB_SOUND_SAMPLE_RATE :: 44100
+LMB_SOUND_CHANNELS :: 1
+LMB_SOUND_DURATION_MS :: 100
+LMB_SOUND_FRAMES :: LMB_SOUND_SAMPLE_RATE * LMB_SOUND_DURATION_MS / 1000
+LMB_SOUND_START_FREQ :: 1200.0
+LMB_SOUND_END_FREQ :: 400.0
+LMB_SOUND_AMPLITUDE :: 0.5
+lmb_sound_pcm_data: [LMB_SOUND_FRAMES]f32; // Buffer to hold the generated PCM data
+lmb_sound_audio_buffer: ma.audio_buffer; // Miniaudio's wrapper for the PCM data
+
+// RMB Particle Sound Definitions
+RMB_HUM_FREQUENCY :: 100.0
+RMB_HUM_AMPLITUDE :: 0.05  // Quieter hum, reduced further
+RMB_PARTICLE_SOUND_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 2 // 0.5 seconds of audio data for looping segments
+
+RMB_WHOOSH_AMPLITUDE :: 0.1 // Whoosh can be a bit louder, but reduced
+MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT :: 5.0 // Adjust this value based on typical particle speeds
+
+// Global PCM data buffers and Miniaudio buffer objects for RMB sounds
+rmb_hum_pcm_data: [RMB_PARTICLE_SOUND_DURATION_FRAMES]f32;
+rmb_whoosh_pcm_data: [RMB_PARTICLE_SOUND_DURATION_FRAMES]f32;
+
+rmb_hum_audio_buffer: ma.audio_buffer;
+rmb_whoosh_audio_buffer: ma.audio_buffer;
+
+// LMB Hit Sound Effects Definitions
+LMB_HIT_WHOOSH_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 10 // 0.1 seconds
+LMB_HIT_WHOOSH_AMPLITUDE :: 0.4
+
+LMB_KILL_EXPLOSION_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 2 // 0.5 seconds
+LMB_KILL_EXPLOSION_AMPLITUDE :: 0.7
+
+// Global PCM data buffers and Miniaudio buffer objects for LMB hit sounds
+lmb_hit_whoosh_pcm_data: [LMB_HIT_WHOOSH_DURATION_FRAMES]f32;
+lmb_hit_whoosh_audio_buffer: ma.audio_buffer;
+
+lmb_kill_explosion_pcm_data: [LMB_KILL_EXPLOSION_DURATION_FRAMES]f32;
+lmb_kill_explosion_audio_buffer: ma.audio_buffer;
 
 // =============================================================================
 // START: Package-Level Declarations
@@ -165,6 +207,9 @@ Particle :: struct {
     is_swirling_charge: bool, 
     is_ammo_indicator: bool, // <<< ADD THIS NEW FLAG
 	active:           bool,
+    sound_hum: ma.sound,
+    sound_whoosh: ma.sound,
+    has_active_sound: bool,
 }
 Particle_Instance_Data :: struct #align(16) {
 	using _: struct #packed {
@@ -245,6 +290,9 @@ state: struct {
     enemy_vs_params: Enemy_Vs_Params, enemy_fs_params: Enemy_Fs_Params, 
     blackhole_vs_params: Blackhole_Vs_Params, blackhole_fs_params: Blackhole_Fs_Params,
 
+    audio_engine: ma.engine,
+    lmb_sound: ma.sound,
+
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, // Player health
     player_invulnerable_timer: f32,    // Invulnerability timer
@@ -285,6 +333,147 @@ init :: proc "c" () {
     context = runtime.default_context()
     sg.setup({ pipeline_pool_size=12, buffer_pool_size=12, shader_pool_size=12, environment=sglue.environment(), logger={func=slog.func} })
     fmt.printf("--- Init Start ---\n")
+
+    // Sokol Audio Setup
+    sokol_audio_desc := sa.Desc {
+        sample_rate = LMB_SOUND_SAMPLE_RATE, // Use new constant
+        num_channels = LMB_SOUND_CHANNELS,   // Use new constant
+        buffer_frames = 1024, 
+        packet_frames = 0,    
+        num_packets = 0,      
+        stream_userdata_cb = geowars_audio_stream_callback,
+        user_data = nil, 
+    }
+    sa.setup(sokol_audio_desc)
+    if !sa.isvalid() {
+        fmt.eprintf("!!! CRITICAL: Sokol Audio setup failed!\n")
+    } else {
+        fmt.printf("--- Sokol Audio Initialized (Sample Rate: %v, Channels: %v) ---\n", sa.sample_rate(), sa.channels())
+    }
+
+    // Miniaudio Engine Setup
+    engine_config := ma.engine_config_init()
+    engine_config.noDevice = true 
+    engine_config.channels = u32(LMB_SOUND_CHANNELS)   // Use new constant
+    engine_config.sampleRate = u32(LMB_SOUND_SAMPLE_RATE) // Use new constant
+
+    init_result := ma.engine_init(&engine_config, &state.audio_engine)
+    if init_result != .SUCCESS {
+        fmt.eprintf("!!! CRITICAL: Miniaudio engine_init failed! Error: %v\n", init_result)
+    } else {
+        fmt.printf("--- Miniaudio Engine Initialized ---\n")
+    }
+
+    // Generate "Pew" Sound PCM Data
+    fmt.printf("--- Generating 'Pew' sound PCM data... ---\n")
+    current_phase: f64 = 0.0 
+   
+    for i in 0..<LMB_SOUND_FRAMES {
+        progress := f64(i) / f64(LMB_SOUND_FRAMES)
+
+        amplitude: f64
+        attack_time := 0.15 // New, longer attack_time (15% of total duration)
+        if progress < attack_time {
+            amplitude = progress / attack_time
+        } else {
+            amplitude = 1.0 - (progress - attack_time) / (1.0 - attack_time)
+        }
+        amplitude = math.max(0.0, amplitude) 
+
+        ratio := LMB_SOUND_END_FREQ / LMB_SOUND_START_FREQ
+        exponent := progress
+        current_freq_f64 := f64(LMB_SOUND_START_FREQ) * math.pow(f64(ratio), exponent)
+
+        sample_val_f64 := math.sin(current_phase)
+       
+        lmb_sound_pcm_data[i] = f32(sample_val_f64 * amplitude * f64(LMB_SOUND_AMPLITUDE))
+
+        current_phase += (2.0 * f64(math.PI) * current_freq_f64) / f64(LMB_SOUND_SAMPLE_RATE)
+        if current_phase >= (2.0 * f64(math.PI)) {
+            current_phase -= (2.0 * f64(math.PI))
+        }
+    }
+    fmt.printf("--- 'Pew' sound PCM data generated. First sample: %v, Mid sample: %v, Last sample: %v ---\n", lmb_sound_pcm_data[0], lmb_sound_pcm_data[LMB_SOUND_FRAMES/2], lmb_sound_pcm_data[LMB_SOUND_FRAMES-1])
+
+    audio_buffer_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_SOUND_FRAMES), rawptr(&lmb_sound_pcm_data[0]), nil)
+    init_ab_result := ma.audio_buffer_init_copy(&audio_buffer_config, &lmb_sound_audio_buffer) 
+    if init_ab_result != .SUCCESS {
+        fmt.eprintf("!!! CRITICAL: Miniaudio audio_buffer_init_copy for LMB sound failed! Error: %v\n", init_ab_result)
+    } else {
+        fmt.printf("--- Miniaudio audio_buffer initialized for LMB sound ---\n")
+        sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } 
+        p_data_source_for_sound := (^ma.data_source)(&lmb_sound_audio_buffer)
+
+        init_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_for_sound, sound_flags, nil, &state.lmb_sound)
+        if init_sound_result != .SUCCESS {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_sound failed! Error: %v\n", init_sound_result)
+            ma.audio_buffer_uninit(&lmb_sound_audio_buffer); 
+        } else {
+            fmt.printf("--- Miniaudio lmb_sound initialized successfully ---\n")
+        }
+    }
+
+    fmt.printf("--- Initializing RMB Particle Sounds ---\n")
+
+    // Generate Hum PCM Data (Loopable Sine Wave)
+    hum_waveform_config := ma.waveform_config_init(
+        ma.format.f32, 
+        u32(LMB_SOUND_CHANNELS), // Assuming mono for particle sounds for now
+        u32(LMB_SOUND_SAMPLE_RATE), 
+        ma.waveform_type.sine, // Use .sine for ma.waveform_type.sine
+        f64(RMB_HUM_AMPLITUDE), 
+        f64(RMB_HUM_FREQUENCY),
+    )
+    hum_sine_wave_gen: ma.waveform
+    init_hum_wf_result := ma.waveform_init(&hum_waveform_config, &hum_sine_wave_gen)
+    if init_hum_wf_result == .SUCCESS {
+        frames_read_hum: u64
+        ma.waveform_read_pcm_frames(&hum_sine_wave_gen, rawptr(&rmb_hum_pcm_data[0]), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), &frames_read_hum)
+        ma.waveform_uninit(&hum_sine_wave_gen) // Uninit after use
+        fmt.printf("--- RMB Hum PCM data generated (%v frames). ---\n", frames_read_hum)
+    } else {
+        fmt.eprintf("!!! CRITICAL: Miniaudio waveform_init for RMB Hum failed! Error: %v\n", init_hum_wf_result)
+    }
+
+    // Generate Whoosh PCM Data (White Noise)
+    whoosh_noise_config := ma.noise_config_init(
+        ma.format.f32,
+        u32(LMB_SOUND_CHANNELS), // Assuming mono
+        ma.noise_type.pink, // Use .pink for ma.noise_type.pink (Changed from white to pink)
+        0, // seed
+        f64(RMB_WHOOSH_AMPLITUDE),
+    )
+    whoosh_noise_gen: ma.noise
+    // The ma_noise_init function expects the sample rate as a separate parameter, not within the config.
+    // Corrected: Second argument should be pAllocationCallbacks, which is nil here. Sample rate is part of config.
+    init_whoosh_noise_result := ma.noise_init(&whoosh_noise_config, nil, &whoosh_noise_gen)
+    if init_whoosh_noise_result == .SUCCESS {
+        frames_read_whoosh: u64
+        ma.noise_read_pcm_frames(&whoosh_noise_gen, rawptr(&rmb_whoosh_pcm_data[0]), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), &frames_read_whoosh)
+        ma.noise_uninit(&whoosh_noise_gen, nil) // Uninit after use
+        fmt.printf("--- RMB Whoosh PCM data generated (%v frames). ---\n", frames_read_whoosh)
+    } else {
+        fmt.eprintf("!!! CRITICAL: Miniaudio noise_init for RMB Whoosh failed! Error: %v\n", init_whoosh_noise_result)
+    }
+
+    // Initialize Miniaudio audio_buffers for hum and whoosh
+    hum_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), rawptr(&rmb_hum_pcm_data[0]), nil)
+    init_hum_ab_result := ma.audio_buffer_init_copy(&hum_ab_config, &rmb_hum_audio_buffer)
+    if init_hum_ab_result == .SUCCESS {
+        fmt.printf("--- RMB Hum audio_buffer initialized. ---\n")
+    } else {
+        fmt.eprintf("!!! CRITICAL: RMB Hum audio_buffer_init_copy failed! Error: %v\n", init_hum_ab_result)
+    }
+
+    whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), rawptr(&rmb_whoosh_pcm_data[0]), nil)
+    init_whoosh_ab_result := ma.audio_buffer_init_copy(&whoosh_ab_config, &rmb_whoosh_audio_buffer)
+    if init_whoosh_ab_result == .SUCCESS {
+        fmt.printf("--- RMB Whoosh audio_buffer initialized. ---\n")
+    } else {
+        fmt.eprintf("!!! CRITICAL: RMB Whoosh audio_buffer_init_copy failed! Error: %v\n", init_whoosh_ab_result)
+    }
+    fmt.printf("--- RMB Particle Sounds Initialized ---\n")
+
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
     state.bind.vertex_buffers[0] = sg.make_buffer({ label="shared-quad-vertices", data=sg.Range{ptr=&vertices[0], size=size_of(vertices)}})
@@ -398,11 +587,72 @@ event :: proc "c" (event: ^sapp.Event) {
     }
 }
 
+geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_channels: c.int, user_data: rawptr) {
+    ma.engine_read_pcm_frames(&state.audio_engine, buffer, u64(num_frames), nil)
+}
+
 // --- Particle System ---
 emit_particle :: proc(part: Particle) {
 	context = runtime.default_context()
-	state.particles[state.next_particle_index] = part
-	state.particles[state.next_particle_index].active = true
+
+    // Target the particle being actually stored in the state.particles array
+    p_to_init_sound := &state.particles[state.next_particle_index]
+    
+    // Initialize 'has_active_sound' to false by default for the particle being placed.
+    // The 'part' argument to emit_particle is copied, so we modify the one in the array.
+    // This also means the 'part' argument should have flags like is_ammo_indicator set by the caller.
+    p_to_init_sound^ = part // Copy initial data from 'part' argument
+    p_to_init_sound.has_active_sound = false // Default to no sound
+
+    if p_to_init_sound.is_ammo_indicator || p_to_init_sound.is_swirling_charge {
+        p_to_init_sound.has_active_sound = true
+        
+        sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } // Default flags
+
+        // Initialize Hum Sound
+        hum_init_res := ma.sound_init_from_data_source(
+            &state.audio_engine, 
+            (^ma.data_source)(&rmb_hum_audio_buffer), 
+            sound_flags, 
+            nil, 
+            &p_to_init_sound.sound_hum,
+        )
+        if hum_init_res == .SUCCESS {
+            ma.sound_set_looping(&p_to_init_sound.sound_hum, true)
+            ma.sound_set_volume(&p_to_init_sound.sound_hum, RMB_HUM_AMPLITUDE) // Initial volume
+            ma.sound_start(&p_to_init_sound.sound_hum)
+        } else {
+            fmt.eprintf("!!! ERROR: Failed to init hum sound for particle. Code: %v\n", hum_init_res)
+            p_to_init_sound.has_active_sound = false // Failed, so no active sound
+        }
+
+        // Initialize Whoosh Sound (only if hum sound succeeded)
+        if p_to_init_sound.has_active_sound { 
+            whoosh_init_res := ma.sound_init_from_data_source(
+                &state.audio_engine,
+                (^ma.data_source)(&rmb_whoosh_audio_buffer),
+                sound_flags,
+                nil,
+                &p_to_init_sound.sound_whoosh,
+            )
+            if whoosh_init_res == .SUCCESS {
+                ma.sound_set_looping(&p_to_init_sound.sound_whoosh, true)
+                ma.sound_set_volume(&p_to_init_sound.sound_whoosh, 0.0) // Whoosh starts silent
+                ma.sound_start(&p_to_init_sound.sound_whoosh)
+            } else {
+                fmt.eprintf("!!! ERROR: Failed to init whoosh sound for particle. Code: %v\n", whoosh_init_res)
+                // If whoosh fails, uninit hum as well to keep consistent state
+                ma.sound_uninit(&p_to_init_sound.sound_hum) 
+                p_to_init_sound.has_active_sound = false // Failed, so no active sound
+            }
+        }
+        
+        if p_to_init_sound.has_active_sound {
+             // fmt.printf("--- Particle sound initialized (Hum/Whoosh) ---\n") // Optional: for debugging
+        }
+    }
+    
+    p_to_init_sound.active = true // Make sure particle is active after all setup
 	state.next_particle_index = (state.next_particle_index + 1) % MAX_PARTICLES
 }
 
@@ -483,6 +733,61 @@ update_and_instance_particles :: proc(dt: f32) -> int {
         } else {
             // --- Regular Particle Update Logic ---
             p.pos += p.vel * dt;
+
+            // --- Off-Screen Particle Check & Cleanup ---
+            // (Ensure 'p' is a pointer to the current particle, e.g., p := &state.particles[i])
+            // Screen boundaries calculation
+            screen_aspect_ratio: f32 = sapp.widthf() / sapp.heightf()
+            world_half_width: f32 = ORTHO_HEIGHT * screen_aspect_ratio
+            world_half_height: f32 = ORTHO_HEIGHT // ORTHO_HEIGHT is likely f32 or compatible (e.g. untyped float const)
+            off_screen_margin: f32 = 0.1 // Margin for particles to be considered off-screen
+
+            is_off_screen := false
+            if p.pos.x < -world_half_width - off_screen_margin ||
+               p.pos.x >  world_half_width + off_screen_margin ||
+               p.pos.y < -world_half_height - off_screen_margin ||
+               p.pos.y >  world_half_height + off_screen_margin {
+                is_off_screen = true
+            }
+
+            if is_off_screen {
+                if p.has_active_sound {
+                    ma.sound_uninit(&p.sound_hum)
+                    ma.sound_uninit(&p.sound_whoosh)
+                    p.has_active_sound = false
+                    // Optional: fmt.printf("--- Particle sound uninitialized (off-screen) for particle %d ---\n", i)
+                }
+                p.active = false
+                // After deactivating, we should skip any further processing for this particle in this frame.
+                // The 'continue' ensures it's not included in sound updates or instancing.
+                continue 
+            }
+            // --- End Off-Screen Particle Check & Cleanup ---
+
+            // Add this block for sound updates:
+            if p.has_active_sound {
+                current_speed := m.len_vec2(p.vel) // Calculate speed from velocity vector
+                
+                // Normalize speed to a 0.0 - 1.0 factor
+                // Ensure MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT is not zero to avoid division by zero
+                speed_factor: f32
+                if MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT > 0.001 { // Check against a small epsilon
+                    speed_factor = math.clamp(current_speed / MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT, 0.0, 1.0)
+                } else {
+                    speed_factor = 0.0 // Default if max speed is zero or too small
+                }
+
+                hum_target_volume := (1.0 - speed_factor) * RMB_HUM_AMPLITUDE
+                whoosh_target_volume := speed_factor * RMB_WHOOSH_AMPLITUDE
+
+                ma.sound_set_volume(&p.sound_hum, hum_target_volume)
+                ma.sound_set_volume(&p.sound_whoosh, whoosh_target_volume)
+                
+                // Optional: Print volumes for debugging
+                // if p.is_ammo_indicator { // Example: only for ammo indicators
+                //    fmt.printf("Particle %d: speed=%.2f, factor=%.2f, hum_vol=%.2f, whoosh_vol=%.2f\n", i, current_speed, speed_factor, hum_target_volume, whoosh_target_volume)
+                // }
+            }
             // Regular particle self-rotation:
             p.rotation += p.angular_vel * dt; 
             if p.rotation > m.TAU { p.rotation -= m.TAU; } else if p.rotation < 0 { p.rotation += m.TAU; }
@@ -507,6 +812,12 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             }
 
             if !p.is_swirling_charge && p.life_remaining <= 0.0 { 
+                if p.has_active_sound {
+                    ma.sound_uninit(&p.sound_hum)
+                    ma.sound_uninit(&p.sound_whoosh)
+                    p.has_active_sound = false
+                    // Optional: fmt.printf("--- Particle sound uninitialized (life expired) ---\n")
+                }
                 p.active = false; 
                 continue; 
             }
@@ -618,6 +929,12 @@ remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
     for i in 0..<MAX_PARTICLES {
         p := &state.particles[i];
         if p.active && p.is_ammo_indicator && int(p.charge_center_pos.x) == charge_slot_index_to_remove {
+            if p.has_active_sound {
+                ma.sound_uninit(&p.sound_hum)
+                ma.sound_uninit(&p.sound_whoosh)
+                p.has_active_sound = false
+                // Optional: fmt.printf("--- Ammo indicator particle sound uninitialized (removed) ---\n")
+            }
             p.active = false; 
             // Optional: Add a quick shrink/fade animation here before deactivation
             // For now, they just disappear.
@@ -687,6 +1004,13 @@ check_RMB_particle_enemy_collisions :: proc() {
                 // RMB particles might do more than 1 damage, or enemy HP might be > 1
                 // So, damage first, then check HP.
                 enemy.hp -= PARTICLE_DAMAGE_VALUE // Assuming PARTICLE_DAMAGE_VALUE is defined (it is, as 1)
+                
+                if particle.has_active_sound {
+                    ma.sound_uninit(&particle.sound_hum)
+                    ma.sound_uninit(&particle.sound_whoosh)
+                    particle.has_active_sound = false
+                    // Optional: fmt.printf("--- RMB particle sound uninitialized (collision) ---\n")
+                }
                 particle.active = false // Particle is consumed
 
                 if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
@@ -1312,6 +1636,17 @@ frame :: proc "c" () {
 
         if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
             spawn_blackhole_projectile_weapon();
+            // Play click sound
+            seek_result := ma.sound_seek_to_pcm_frame(&state.lmb_sound, 0)
+            if seek_result != .SUCCESS {
+                // Optional: Log warning if seek fails, but proceed to start anyway
+                fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result)
+            }
+            start_result := ma.sound_start(&state.lmb_sound)
+            if start_result != .SUCCESS {
+                // Optional: Log warning if sound start fails
+                fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result)
+            }
             state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
         }
         state.previous_lmb_down = state.lmb_down;
@@ -1425,5 +1760,37 @@ frame :: proc "c" () {
 }
 
 
-cleanup :: proc "c" () { context=runtime.default_context(); sg.shutdown(); }
+cleanup :: proc "c" () { 
+    context=runtime.default_context(); 
+    
+    // Cleanup Miniaudio sound
+    // Check if the sound was successfully initialized before trying to uninit.
+    // (Assuming state.click_sound.pDataSource is not nil if initialized, or similar check.
+    // For now, we'll call uninit directly. If it crashes, we add checks later.)
+    ma.sound_uninit(&state.lmb_sound) 
+    fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
+
+    // Cleanup Miniaudio audio_buffer that holds the click sound's PCM data
+    // This is necessary because ma_audio_buffer_init_copy was used.
+    ma.audio_buffer_uninit(&lmb_sound_audio_buffer) 
+    fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
+
+    // Cleanup global RMB audio_buffers
+    ma.audio_buffer_uninit(&rmb_hum_audio_buffer)
+    fmt.printf("--- RMB Hum global audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer)
+    fmt.printf("--- RMB Whoosh global audio_buffer uninitialized ---\n")
+
+    // Cleanup Miniaudio engine
+    ma.engine_uninit(&state.audio_engine)
+    fmt.printf("--- Miniaudio engine uninitialized ---\n")
+
+    // Shutdown Sokol Audio
+    if sa.isvalid() { // Check if Sokol Audio was successfully initialized
+        sa.shutdown()
+        fmt.printf("--- Sokol Audio shutdown ---\n")
+    }
+    
+    sg.shutdown(); 
+}
 main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Grunt Collision", icon={sokol_default=true}, logger={func=slog.func} }) }
