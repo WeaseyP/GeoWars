@@ -22,16 +22,16 @@ LMB_SOUND_DURATION_MS :: 100
 LMB_SOUND_FRAMES :: LMB_SOUND_SAMPLE_RATE * LMB_SOUND_DURATION_MS / 1000
 LMB_SOUND_START_FREQ :: 1200.0
 LMB_SOUND_END_FREQ :: 400.0
-LMB_SOUND_AMPLITUDE :: 0.5
+LMB_SOUND_AMPLITUDE :: 0.25
 lmb_sound_pcm_data: [LMB_SOUND_FRAMES]f32; // Buffer to hold the generated PCM data
 lmb_sound_audio_buffer: ma.audio_buffer; // Miniaudio's wrapper for the PCM data
 
 // RMB Particle Sound Definitions
 RMB_HUM_FREQUENCY :: 100.0
-RMB_HUM_AMPLITUDE :: 0.05  // Quieter hum, reduced further
+RMB_HUM_AMPLITUDE :: 0.1  // Quieter hum, reduced further
 RMB_PARTICLE_SOUND_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 2 // 0.5 seconds of audio data for looping segments
 
-RMB_WHOOSH_AMPLITUDE :: 0.1 // Whoosh can be a bit louder, but reduced
+RMB_WHOOSH_AMPLITUDE :: 0.25 // Whoosh can be a bit louder, but reduced
 MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT :: 5.0 // Adjust this value based on typical particle speeds
 
 // Global PCM data buffers and Miniaudio buffer objects for RMB sounds
@@ -90,7 +90,7 @@ SYNTH_TRACK_BPM         :: DRUM_TRACK_BPM
 SYNTH_TRACK_BEATS_PER_BAR :: DRUM_TRACK_BEATS_PER_BAR
 SYNTH_TRACK_NUM_BARS    :: DRUM_TRACK_NUM_BARS 
 
-SYNTH_TRACK_AMPLITUDE   :: 0.45 // Master amplitude for the synth track
+SYNTH_TRACK_AMPLITUDE   :: 0.30 // Master amplitude for the synth track
 
 // ADSR for synth notes
 SYNTH_NOTE_ATTACK_TIME_S  :: 0.02
@@ -411,15 +411,15 @@ init :: proc "c" () {
     KICK_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
     KICK_START_FREQ :: 120.0; 
     KICK_END_FREQ :: 40.0;
-    KICK_AMPLITUDE := 0.9 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable for clarity inside init
+    RELATIVE_KICK_AMPLITUDE  := 0.6; // Made it a normal variable for clarity inside init
 
     SNARE_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 6;
     SNARE_START_FREQ :: 220.0; 
-    SNARE_AMPLITUDE := 0.75 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable
+    RELATIVE_SNARE_AMPLITUDE  := 0.4; // Made it a normal variable
 
     HIHAT_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 16;
     HIHAT_FREQ :: 6000.0; 
-    HIHAT_AMPLITUDE := 0.3 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable
+    RELATIVE_HIHAT_AMPLITUDE   := 0.15; // Made it a normal variable
 
     // Zero out the buffer first
     for i in 0..<DRUM_TRACK_TOTAL_FRAMES { 
@@ -446,7 +446,7 @@ init :: proc "c" () {
                     current_freq_kick: f64 = f64(KICK_START_FREQ) * math.pow_f64(f64(KICK_END_FREQ) / f64(KICK_START_FREQ), progress);
                     
                     sample_val_kick: f64 = math.sin(current_phase_kick);
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick_env * f64(KICK_AMPLITUDE));
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick_env * f64(RELATIVE_KICK_AMPLITUDE));
                     
                     current_phase_kick += (2.0 * f64(math.PI) * current_freq_kick) / f64(DRUM_TRACK_SAMPLE_RATE);
                     if current_phase_kick >= (2.0 * f64(math.PI)) { current_phase_kick -= (2.0 * f64(math.PI)) }
@@ -465,7 +465,7 @@ init :: proc "c" () {
                     amplitude_snare_env = math.max(0.0, amplitude_snare_env);
                     
                     sample_val_snare: f64 = math.sin(current_phase_snare); // Simple sine for snare, noise would be better
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare_env * f64(SNARE_AMPLITUDE));
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare_env * f64(RELATIVE_SNARE_AMPLITUDE));
                     
                     current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE); // Using SNARE_START_FREQ as constant pitch for simplicity
                     if current_phase_snare >= (2.0 * f64(math.PI)) { current_phase_snare -= (2.0 * f64(math.PI)) }
@@ -494,7 +494,7 @@ init :: proc "c" () {
                     amplitude_hihat_env = math.max(0.0, amplitude_hihat_env);
 
                     sample_val_hihat: f64 = math.sin(current_phase_hihat); // Simple sine for hi-hat, noise/filtered noise better
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat_env * f64(HIHAT_AMPLITUDE));
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat_env * f64(RELATIVE_HIHAT_AMPLITUDE));
 
                     current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
                     if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
