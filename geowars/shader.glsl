@@ -152,11 +152,18 @@ void main() {
     }
 
 
+    // --- Determine Persistent Health Color for Ring 2 ---
+    // ... (existing health color logic) ...
+
+    // --- Define Player Glow Color ---
+    vec3 player_glow_color = color_ring2_health_based; // Base glow on health ring color
+
     // --- Calculate Component Alphas & Apply Death State ---
     float core_alpha = 0.0;
     float ring1_alpha = 0.0;
     float ring2_alpha = 0.0;
     float glow_alpha_contrib = 0.0;
+    float glow_shape_alpha = 0.0; // Initialize new glow alpha
 
     // Core
     float core_rad_anim = 0.04 + 0.005 * sin(anim_time * 25.0);
@@ -184,7 +191,15 @@ void main() {
     ring2_alpha = smoothstep(0.003, 0.0, r2_dist_sdf);
     if (hp <= 0.01) ring2_alpha = 0.0;
 
-    // Glow & Spikes
+    // --- SDF for Health-Based Glow ---
+    float glow_radius = r2_rad_anim + 0.05; // Glow slightly larger than the outer ring
+    float glow_dist_sdf = sdCircle(p_orig, glow_radius);
+
+    // --- Calculate Alpha for Health-Based Glow ---
+    glow_shape_alpha = 0.5 * smoothstep(0.025, 0.0, glow_dist_sdf); // Adjust 0.5 for intensity, 0.025 for spread
+    if (hp <= 0.01) glow_shape_alpha = 0.0; // No glow on death
+
+    // Glow & Spikes (existing dynamic glow)
     float dist_glow = length(p_orig);
     float spike_rot_glow = anim_time * 0.8; 
     float base_angle_glow = atan(p_orig.y, p_orig.x);
@@ -198,13 +213,13 @@ void main() {
 
     // --- Combine Colors Additively & Determine Final Alpha ---
     vec3 combined_color = vec3(0.0);
-    combined_color += color_glow_dynamic * glow_alpha_contrib * 2.0; // Glow is more of an additive effect
+    combined_color += player_glow_color * glow_shape_alpha; // Health-based glow first (behind other elements)
+    combined_color += color_glow_dynamic * glow_alpha_contrib * 2.0; // Existing dynamic glow/spikes
     combined_color += color_ring2_health_based * ring2_alpha;
     combined_color += color_ring1_default * 1.5 * ring1_alpha; // Apply brightness multiplier here
     combined_color += color_core_default * core_alpha;
     
-    float final_alpha = max(max(core_alpha, ring1_alpha), max(ring2_alpha, glow_alpha_contrib));
-
+    float final_alpha = max(max(max(core_alpha, ring1_alpha), max(ring2_alpha, glow_alpha_contrib)), glow_shape_alpha); // Include new glow_shape_alpha
 
     // --- Apply Flash Overlay (if invulnerable and alive) ---
     if (invul_timer > 0.001 && invul_duration > 0.001 && hp > 0.01) {

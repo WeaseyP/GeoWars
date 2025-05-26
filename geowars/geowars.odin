@@ -200,7 +200,7 @@ ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0
 ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 
 
 // Enemy Death Particle Constants
-LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
+LMB_ENEMY_DEATH_PARTICLE_COUNT :: 60
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
 LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
@@ -209,8 +209,11 @@ LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025
 LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
 LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
 
+// Enemy Hit Particle Constants
+ENEMY_HIT_PARTICLE_COUNT :: 20
+
 // RMB Enemy Death Particle Constants
-RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
+RMB_ENEMY_DEATH_PARTICLE_COUNT :: 60 
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
 RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
@@ -1101,6 +1104,30 @@ spawn_swirling_charge :: proc() {
 	}
 }
 
+spawn_enemy_hit_particles :: proc(pos: m.vec2, enemy_color: m.vec4) {
+	context = runtime.default_context()
+	for _ in 0..<ENEMY_HIT_PARTICLE_COUNT {
+		particle_dir_angle := rand.float32() * m.TAU 
+		particle_dir := m.angle_to_vec2(particle_dir_angle) 
+		particle_speed := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE * 0.75 + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND * 0.75 // Slightly slower than death
+		particle_life := (LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND) * 0.6 // Shorter life
+		particle_size := (LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND) * 0.7 // Slightly smaller
+		particle_angular_vel := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX 
+		
+		particle_hit_color := enemy_color; 
+		particle_hit_color.r = math.min(enemy_color.r * 1.2 + 0.2, 1.0);
+		particle_hit_color.g = math.min(enemy_color.g * 1.2 + 0.2, 1.0);
+		particle_hit_color.b = math.min(enemy_color.b * 1.2 + 0.2, 1.0);
+		particle_hit_color.a = rand.float32_range(0.6, 0.85); 
+		
+		emit_particle(Particle{
+			pos=pos, vel=particle_dir*particle_speed, cloud_travel_vel={0,0}, color=particle_hit_color, size=particle_size, start_size=particle_size,
+            life_remaining=particle_life, life_max=particle_life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=particle_angular_vel,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
+		})
+	}
+}
+
 update_and_instance_particles :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_particle_count := 0
@@ -1274,9 +1301,9 @@ remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
     }
 }
 
-spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
+spawn_RMB_enemy_death_particles :: proc(pos: m.vec2, enemy_color: m.vec4) {
 	context = runtime.default_context()
-	base_death_color_rmb := RMB_PARTICLE_COLOR; // Renamed
+	// base_death_color_rmb := RMB_PARTICLE_COLOR; // Removed
 	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
 		angle_rmb_d := rand.float32() * m.TAU // Renamed
 		dir_rmb_d := m.angle_to_vec2(angle_rmb_d) // Renamed
@@ -1284,11 +1311,11 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 		life_rmb_d := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
 		size_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
 		angular_vel_rmb_d := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
-		particle_color_rmb_d := base_death_color_rmb; // Renamed
-		particle_color_rmb_d.r = math.clamp(base_death_color_rmb.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
-		particle_color_rmb_d.g = math.clamp(base_death_color_rmb.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
-		particle_color_rmb_d.b = math.clamp(base_death_color_rmb.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
-		particle_color_rmb_d.a = rand.float32_range(0.6, 0.9); 
+		particle_color_rmb_d := enemy_color; // Use the passed-in enemy_color
+		particle_color_rmb_d.r = math.min(enemy_color.r * 1.2 + 0.2, 1.0);
+		particle_color_rmb_d.g = math.min(enemy_color.g * 1.2 + 0.2, 1.0);
+		particle_color_rmb_d.b = math.min(enemy_color.b * 1.2 + 0.2, 1.0);
+		particle_color_rmb_d.a = rand.float32_range(0.7, 0.95); // Consistent with LMB
 		emit_particle(Particle{
 			pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
             life_remaining=life_rmb_d, life_max=life_rmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_rmb_d,
@@ -1320,6 +1347,10 @@ check_RMB_particle_enemy_collisions :: proc() {
 
             if dist_sq_rmb_coll < radii_sum_sq_rmb_coll {
                 enemy_rmb_coll.hp -= PARTICLE_DAMAGE_VALUE 
+                
+                if enemy_rmb_coll.hp > 0 {
+                    spawn_enemy_hit_particles(enemy_rmb_coll.pos, enemy_rmb_coll.color);
+                }
                 fmt.printf("RMB Hit: Enemy %p, HP before sound check: %d\n", enemy_rmb_coll, enemy_rmb_coll.hp);
                 
                 if enemy_rmb_coll.hp <= 0 {
@@ -1354,7 +1385,7 @@ check_RMB_particle_enemy_collisions :: proc() {
                         enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
                     enemy_rmb_coll.death_rect_offset = 0.0;
-                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos); 
+                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos, enemy_rmb_coll.color); 
                     if enemy_rmb_coll.type == .GRUNT && !state.first_grunt_killed {
                         state.first_grunt_killed = true;
                         start_drum_err_rmb := ma.sound_start(&state.drum_track_sound); // Renamed
@@ -1397,6 +1428,10 @@ check_LMB_projectile_enemy_collisions :: proc() {
             if dist_sq_lmb_coll < radii_sum_sq_lmb_coll {
                 proj_lmb_coll.active = false    
                 enemy_lmb_coll.hp -= LMB_PROJECTILE_DAMAGE; 
+
+                if enemy_lmb_coll.hp > 0 {
+                    spawn_enemy_hit_particles(enemy_lmb_coll.pos, enemy_lmb_coll.color);
+                }
                 fmt.printf("LMB Hit: Enemy %p, HP before sound check: %d\n", enemy_lmb_coll, enemy_lmb_coll.hp);
                 if enemy_lmb_coll.hp <= 0 {
                     if !enemy_lmb_coll.is_dying {
