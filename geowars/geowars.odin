@@ -1,4 +1,4 @@
-// File: geowars.odin (Revised for Grunt-Player Collision Damage)
+// File: geowars.odin (Revised for Grunt-Player Collision Damage & Synth Track)
 //------------------------------------------------------------------------------
 package main
 
@@ -72,19 +72,35 @@ ENEMY_DEATH_SOUND_SINE_END_FREQ :: 50.0
 ENEMY_DEATH_SOUND_SINE_AMPLITUDE :: 0.20
 
 // Drum Track Definitions
-DRUM_TRACK_SAMPLE_RATE :: LMB_SOUND_SAMPLE_RATE // Use existing rate
-DRUM_TRACK_CHANNELS :: LMB_SOUND_CHANNELS   // Use existing channels
+DRUM_TRACK_SAMPLE_RATE :: LMB_SOUND_SAMPLE_RATE 
+DRUM_TRACK_CHANNELS :: LMB_SOUND_CHANNELS   
 DRUM_TRACK_BPM :: 160.0
 DRUM_TRACK_BEATS_PER_BAR :: 4
-DRUM_TRACK_NUM_BARS :: 2 // For a short loop
+DRUM_TRACK_NUM_BARS :: 2 
 DRUM_TRACK_SECONDS_PER_BEAT :: 60.0 / DRUM_TRACK_BPM
-// DRUM_TRACK_FRAMES_PER_BEAT :: int(math.round_f32(DRUM_TRACK_SECONDS_PER_BEAT * f32(DRUM_TRACK_SAMPLE_RATE))) // Will be moved to init
-// DRUM_TRACK_FRAMES_PER_BAR :: DRUM_TRACK_FRAMES_PER_BEAT * DRUM_TRACK_BEATS_PER_BAR // Will be moved to init
-// DRUM_TRACK_TOTAL_FRAMES :: DRUM_TRACK_FRAMES_PER_BAR * DRUM_TRACK_NUM_BARS // Will be moved to init
-DRUM_TRACK_AMPLITUDE :: 0.6 // Master amplitude for the drum track
+DRUM_TRACK_AMPLITUDE :: 0.6 
 
-drum_track_pcm_data: []f32; // Will be allocated in init
+drum_track_pcm_data: []f32; 
 drum_track_audio_buffer: ma.audio_buffer;
+
+// SYNTH TRACK DEFINITIONS (<<< NEW SECTION START >>>)
+SYNTH_TRACK_SAMPLE_RATE :: DRUM_TRACK_SAMPLE_RATE
+SYNTH_TRACK_CHANNELS    :: DRUM_TRACK_CHANNELS
+SYNTH_TRACK_BPM         :: DRUM_TRACK_BPM 
+SYNTH_TRACK_BEATS_PER_BAR :: DRUM_TRACK_BEATS_PER_BAR
+SYNTH_TRACK_NUM_BARS    :: DRUM_TRACK_NUM_BARS 
+
+SYNTH_TRACK_AMPLITUDE   :: 0.45 // Master amplitude for the synth track
+
+// ADSR for synth notes
+SYNTH_NOTE_ATTACK_TIME_S  :: 0.02
+SYNTH_NOTE_DECAY_TIME_S   :: 0.1
+SYNTH_NOTE_SUSTAIN_LEVEL  :: 0.6
+SYNTH_NOTE_RELEASE_TIME_S :: 0.05
+
+synth_track_pcm_data: []f32; 
+synth_track_audio_buffer: ma.audio_buffer;
+// (<<< NEW SECTION END >>>)
 
 // Global PCM data buffers and Miniaudio buffer objects for enemy sounds
 enemy_hit_sound_pcm_data: [ENEMY_HIT_SOUND_FRAMES]f32;
@@ -114,11 +130,11 @@ PLAYER_CORE_SHADER_RADIUS :: 0.04
 PLAYER_UV_SPACE_EXTENT   :: 0.5
 PLAYER_CORE_WORLD_RADIUS :: (PLAYER_CORE_SHADER_RADIUS / PLAYER_UV_SPACE_EXTENT) * PLAYER_SCALE
 PLAYER_BOUNCE_DAMPING_FACTOR :: 1.05
-PLAYER_MAX_HP_VALUE      :: 4 // From previous implementation
-PLAYER_INVULNERABILITY_DURATION :: 0.75 // From previous implementation for particle hits
-PARTICLE_DAMAGE_VALUE    :: 1 // From previous (RMB particle damage)
-LMB_PROJECTILE_DAMAGE    :: 2 // <<< NEW: Damage LMB projectile deals
-ENEMY_GRUNT_DAMAGE_VALUE :: 1 // <<< NEW: Damage grunt deals to player
+PLAYER_MAX_HP_VALUE      :: 4 
+PLAYER_INVULNERABILITY_DURATION :: 0.75 
+PARTICLE_DAMAGE_VALUE    :: 1 
+LMB_PROJECTILE_DAMAGE    :: 2 
+ENEMY_GRUNT_DAMAGE_VALUE :: 1 
 
 // Black Hole (RMB) Constants
 BLACKHOLE_COOLDOWN_DURATION :: 1.0 
@@ -158,11 +174,11 @@ ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
 ENEMY_SLOWBOY_SPEED :: f32(0.15)
 ENEMY_SLOWBOY_MAX_HP :: 16
 // --- SlowBoy Attack Constants ---
-SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; // UPDATED
+SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; 
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
-SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; // UPDATED
-SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; // UPDATED
-SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; // Multiplier for PLAYER_MAX_SPEED
+SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 
+SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; 
+SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; 
 SLOWBOY_ATTACK_DAMAGE :: 1;
 // --- Common Enemy Constants ---
 ENEMY_SPAWN_INTERVAL :: 0.5
@@ -176,12 +192,12 @@ ENEMY_BASE_ALPHA :: 0.65
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
 ENEMY_GRUNT_MAX_HP :: 4
-ENEMY_DEATH_ANIM_DURATION :: 1.0  // Duration of the splitting/shrinking animation
+ENEMY_DEATH_ANIM_DURATION :: 1.0  
 GRUNT_DEATH_ANIM_DURATION :: 3.0 
 SLOWBOY_DEATH_ANIM_DURATION :: 1.0
-ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 // How fast the two parts separate
-ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 // They shrink to nothing
-ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // NEW: Quad is 2.5x bigger during death anim
+ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 
+ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 
+ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
@@ -203,17 +219,14 @@ RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015
 RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
 RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
 RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} 
-RMB_AMMO_REGEN_INTERVAL :: 10.0 // Seconds to regenerate one charge
-MAX_RMB_AMMO_CHARGES    :: 2    // Max number of charges player can hold
-RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE :: 16 // Number of visual particles per ammo charge
-RMB_AMMO_INDICATOR_ORBIT_RADIUS         :: PLAYER_SCALE * 0.5 // Distance from player center
-RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8        // Radians per second for the group
-RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018              // Size of each indicator particle
-RMB_AMMO_INDICATOR_COLOR                :: m.vec4{0.7, 0.4, 1.0, 0.75} // Distinct bright purple, slightly transparent
-RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6         // How fast each particle spins on its own axis
-
-    
-
+RMB_AMMO_REGEN_INTERVAL :: 10.0 
+MAX_RMB_AMMO_CHARGES    :: 2    
+RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE :: 16 
+RMB_AMMO_INDICATOR_ORBIT_RADIUS         :: PLAYER_SCALE * 0.5 
+RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8        
+RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018              
+RMB_AMMO_INDICATOR_COLOR                :: m.vec4{0.7, 0.4, 1.0, 0.75} 
+RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6         
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7
@@ -238,12 +251,12 @@ Particle :: struct {
 	life_remaining:   f32,
 	life_max:         f32,      
     swirl_duration:   f32,      
-	rotation:         f32,         // For ammo indicators, this will be their orbit angle around the player
-	angular_vel:      f32,         // For ammo indicators, this will be their self-spin
+	rotation:         f32,         
+	angular_vel:      f32,         
     charge_center_pos: m.vec2, 
 	is_burst_particle: bool,
     is_swirling_charge: bool, 
-    is_ammo_indicator: bool, // <<< ADD THIS NEW FLAG
+    is_ammo_indicator: bool, 
 	active:           bool,
     sound_hum: ma.sound,
     sound_whoosh: ma.sound,
@@ -288,7 +301,7 @@ Enemy :: struct {
     rotation: f32,         
     angular_vel: f32,    
     hp: i32, 
-    type: EnemyType, // <<< NEW: Enemy type
+    type: EnemyType, 
     active: bool,
     current_wander_vector: m.vec2,
     wander_timer: f32,
@@ -308,13 +321,13 @@ Enemy :: struct {
 
 Enemy_Instance_Data :: struct #align(16) {
     using _: struct #packed {
-        instance_pos: m.vec2,         // 8 bytes
-        instance_main_rotation: f32,  // 4 bytes
-        instance_visual_scale: f32,   // 4 bytes (Total 16)
-        instance_color: m.vec4,       // 16 bytes (Total 32)
-        instance_effect_params: m.vec4, // 16 bytes (Total 48)
-        instance_enemy_type: f32,     // 4 bytes  (Total 52)
-        _padding0: m.vec3,            // 12 bytes (Total 64, which is 4 * 16)
+        instance_pos: m.vec2,         
+        instance_main_rotation: f32,  
+        instance_visual_scale: f32,   
+        instance_color: m.vec4,       
+        instance_effect_params: m.vec4, 
+        instance_enemy_type: f32,     
+        _padding0: m.vec3,            
     },
 }
 
@@ -335,12 +348,14 @@ state: struct {
     rmb_hit_sound: ma.sound,
     rmb_kill_sound: ma.sound,
     drum_track_sound: ma.sound,
+    synth_track_sound: ma.sound, // <<< NEW
 
     first_grunt_killed: bool, 
+    first_slowboy_killed: bool, // <<< NEW
     player_pos: m.vec2, player_vel: m.vec2,
-    player_hp: int, player_max_hp: int, // Player health
-    player_invulnerable_timer: f32,    // Invulnerability timer
-    player_defeated_message_shown: bool, // To show defeat message only once
+    player_hp: int, player_max_hp: int, 
+    player_invulnerable_timer: f32,    
+    player_defeated_message_shown: bool, 
 
     key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool,
     
@@ -363,8 +378,8 @@ state: struct {
     enemies: [MAX_ENEMIES]Enemy, enemy_instance_data: [MAX_ENEMIES]Enemy_Instance_Data,
     enemy_instance_vbo: sg.Buffer, enemy_bind: sg.Bindings,
     next_enemy_index: int, num_active_enemies: int,
-    grunt_spawn_timer: f32, // UPDATED
-    slowboy_spawn_timer: f32, // UPDATED
+    grunt_spawn_timer: f32, 
+    slowboy_spawn_timer: f32, 
     
 }
 
@@ -375,70 +390,63 @@ state: struct {
 
 init :: proc "c" () {
     context = runtime.default_context()
-    sg.setup({ pipeline_pool_size=12, buffer_pool_size=12, shader_pool_size=12, environment=sglue.environment(), logger={func=slog.func} })
+    sg.setup({ pipeline_pool_size=16, buffer_pool_size=16, shader_pool_size=16, environment=sglue.environment(), logger={func=slog.func} }) // Increased pool sizes slightly
     fmt.printf("--- Init Start ---\n")
 
-    // Calculate Drum Track Frame Counts (moved from global consts)
-    // Calculate Drum Track Frame Counts (moved from global consts)
+    // Calculate Drum Track Frame Counts
     DRUM_TRACK_FRAMES_PER_BEAT_F32 := DRUM_TRACK_SECONDS_PER_BEAT * f32(DRUM_TRACK_SAMPLE_RATE);
     DRUM_TRACK_FRAMES_PER_BEAT := int(math.round_f32(DRUM_TRACK_FRAMES_PER_BEAT_F32));
     DRUM_TRACK_FRAMES_PER_BAR := DRUM_TRACK_FRAMES_PER_BEAT * DRUM_TRACK_BEATS_PER_BAR;
     DRUM_TRACK_TOTAL_FRAMES := DRUM_TRACK_FRAMES_PER_BAR * DRUM_TRACK_NUM_BARS;
     
-    // Allocate the drum_track_pcm_data slice
-    // Ensure drum_track_pcm_data is declared globally as: drum_track_pcm_data: []f32;
     drum_track_pcm_data = make([]f32, DRUM_TRACK_TOTAL_FRAMES);
     if drum_track_pcm_data == nil {
         fmt.eprintf("!!! CRITICAL: Failed to allocate drum_track_pcm_data slice! Total Frames: %d", DRUM_TRACK_TOTAL_FRAMES);
-        return; // Cannot proceed if allocation fails
+        return; 
     }
     fmt.printf("--- Drum track PCM data slice allocated. Total Frames: %d ---", DRUM_TRACK_TOTAL_FRAMES);
 
-    // NOTE: Ensure this point is AFTER other sound initializations if drum track constants depend on them,
-    // OR ensure drum track constants like DRUM_TRACK_AMPLITUDE are globally defined :: constants.
-    // The provided snippet assumes DRUM_TRACK_AMPLITUDE is a global :: constant.
-
-    // Generate Revised Placeholder Drum Track PCM Data
     fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---");
     
-    // Define simple drum sound characteristics (local constants and variables)
     KICK_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
     KICK_START_FREQ :: 120.0; 
     KICK_END_FREQ :: 40.0;
-    KICK_AMPLITUDE :: 0.9 * DRUM_TRACK_AMPLITUDE;
+    KICK_AMPLITUDE := 0.9 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable for clarity inside init
 
     SNARE_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 6;
     SNARE_START_FREQ :: 220.0; 
-    SNARE_AMPLITUDE :: 0.75 * DRUM_TRACK_AMPLITUDE;
+    SNARE_AMPLITUDE := 0.75 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable
 
     HIHAT_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 16;
     HIHAT_FREQ :: 6000.0; 
-    HIHAT_AMPLITUDE :: 0.3 * DRUM_TRACK_AMPLITUDE;
+    HIHAT_AMPLITUDE := 0.3 * DRUM_TRACK_AMPLITUDE; // Made it a normal variable
 
     // Zero out the buffer first
     for i in 0..<DRUM_TRACK_TOTAL_FRAMES { 
         drum_track_pcm_data[i] = 0.0;
     }
 
-    // Generate PCM data bar by bar, beat by beat
-    for bar in 0..<DRUM_TRACK_NUM_BARS {
-        for beat_idx in 0..<DRUM_TRACK_BEATS_PER_BAR { // Renamed 'beat' to 'beat_idx'
-            beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + (beat_idx * DRUM_TRACK_FRAMES_PER_BEAT);
+    // Generate PCM data bar by bar (Corrected Loop Structure)
+    for bar_idx in 0..<DRUM_TRACK_NUM_BARS {
+        // --- KICK and SNARE ---
+        for beat_num_in_bar in 0..<DRUM_TRACK_BEATS_PER_BAR {
+            beat_start_frame_offset := beat_num_in_bar * DRUM_TRACK_FRAMES_PER_BEAT;
+            current_beat_global_start_frame := (bar_idx * DRUM_TRACK_FRAMES_PER_BAR) + beat_start_frame_offset;
 
             // --- KICK DRUM ---
-            if beat_idx == 0 || beat_idx == 2 {
+            if beat_num_in_bar == 0 || beat_num_in_bar == 2 {
                 current_phase_kick: f64 = 0.0;
                 for kick_i in 0..<KICK_DURATION_FRAMES {
-                    frame_in_track := beat_start_frame + kick_i;
+                    frame_in_track := current_beat_global_start_frame + kick_i;
                     if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
 
                     progress: f64 = f64(kick_i) / f64(KICK_DURATION_FRAMES);
-                    amplitude_kick: f64 = math.pow_f64(f64(1.0) - progress, 2.5);
-                    amplitude_kick = math.max(0.0, amplitude_kick);
+                    amplitude_kick_env: f64 = math.pow_f64(f64(1.0) - progress, 2.5); // Renamed to avoid conflict
+                    amplitude_kick_env = math.max(0.0, amplitude_kick_env);
                     current_freq_kick: f64 = f64(KICK_START_FREQ) * math.pow_f64(f64(KICK_END_FREQ) / f64(KICK_START_FREQ), progress);
                     
                     sample_val_kick: f64 = math.sin(current_phase_kick);
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick * f64(KICK_AMPLITUDE));
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick_env * f64(KICK_AMPLITUDE));
                     
                     current_phase_kick += (2.0 * f64(math.PI) * current_freq_kick) / f64(DRUM_TRACK_SAMPLE_RATE);
                     if current_phase_kick >= (2.0 * f64(math.PI)) { current_phase_kick -= (2.0 * f64(math.PI)) }
@@ -446,65 +454,64 @@ init :: proc "c" () {
             }
 
             // --- SNARE DRUM ---
-            if beat_idx == 1 || beat_idx == 3 {
+            if beat_num_in_bar == 1 || beat_num_in_bar == 3 {
                 current_phase_snare: f64 = 0.0;
                 for snare_i in 0..<SNARE_DURATION_FRAMES {
-                    frame_in_track := beat_start_frame + snare_i;
+                    frame_in_track := current_beat_global_start_frame + snare_i;
                     if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
 
                     progress: f64 = f64(snare_i) / f64(SNARE_DURATION_FRAMES);
-                    amplitude_snare: f64 = math.pow_f64(f64(1.0) - progress, 3.5); 
-                    amplitude_snare = math.max(0.0, amplitude_snare);
+                    amplitude_snare_env: f64 = math.pow_f64(f64(1.0) - progress, 3.5); // Renamed
+                    amplitude_snare_env = math.max(0.0, amplitude_snare_env);
                     
-                    sample_val_snare: f64 = math.sin(current_phase_snare);
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare * f64(SNARE_AMPLITUDE));
+                    sample_val_snare: f64 = math.sin(current_phase_snare); // Simple sine for snare, noise would be better
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare_env * f64(SNARE_AMPLITUDE));
                     
-                    current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE); // Using SNARE_START_FREQ as constant pitch for simplicity
                     if current_phase_snare >= (2.0 * f64(math.PI)) { current_phase_snare -= (2.0 * f64(math.PI)) }
                 }
             }
+        } // End KICK/SNARE for bar_idx
 
-            // --- HI-HATS ---
-            for eighth_note in 0..<(DRUM_TRACK_BEATS_PER_BAR * 2) { 
-                eighth_note_offset_frames := eighth_note * (DRUM_TRACK_FRAMES_PER_BEAT / 2);
-                hihat_beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + eighth_note_offset_frames;
-                
-                on_main_kick_pos := (eighth_note == 0 || eighth_note == 4);
-                on_main_snare_pos := (eighth_note == 2 || eighth_note == 6);
+        // --- HI-HATS (across the entire bar_idx) ---
+        for eighth_note_in_bar_idx in 0..<(DRUM_TRACK_BEATS_PER_BAR * 2) {
+            eighth_note_offset_from_bar_start := eighth_note_in_bar_idx * (DRUM_TRACK_FRAMES_PER_BEAT / 2);
+            hihat_global_start_frame := (bar_idx * DRUM_TRACK_FRAMES_PER_BAR) + eighth_note_offset_from_bar_start;
+            
+            is_on_kick_pos  := (eighth_note_in_bar_idx == 0 || eighth_note_in_bar_idx == 4); 
+            is_on_snare_pos := (eighth_note_in_bar_idx == 2 || eighth_note_in_bar_idx == 6);
 
-                if on_main_kick_pos || on_main_snare_pos { 
-                    // Skip
-                } else {
-                    current_phase_hihat: f64 = 0.0;
-                    for hihat_i in 0..<HIHAT_DURATION_FRAMES {
-                        frame_in_track := hihat_beat_start_frame + hihat_i;
-                        if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+            if is_on_kick_pos || is_on_snare_pos { 
+                // Skip hi-hat on main kick/snare beats
+            } else {
+                current_phase_hihat: f64 = 0.0;
+                for hihat_i in 0..<HIHAT_DURATION_FRAMES {
+                    frame_in_track := hihat_global_start_frame + hihat_i;
+                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
 
-                        progress: f64 = f64(hihat_i) / f64(HIHAT_DURATION_FRAMES);
-                        amplitude_hihat: f64 = math.pow_f64(f64(1.0) - progress, 2.0); 
-                        amplitude_hihat = math.max(0.0, amplitude_hihat);
+                    progress: f64 = f64(hihat_i) / f64(HIHAT_DURATION_FRAMES);
+                    amplitude_hihat_env: f64 = math.pow_f64(f64(1.0) - progress, 2.0); // Renamed
+                    amplitude_hihat_env = math.max(0.0, amplitude_hihat_env);
 
-                        sample_val_hihat: f64 = math.sin(current_phase_hihat);
-                        drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat * f64(HIHAT_AMPLITUDE));
+                    sample_val_hihat: f64 = math.sin(current_phase_hihat); // Simple sine for hi-hat, noise/filtered noise better
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat_env * f64(HIHAT_AMPLITUDE));
 
-                        current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
-                        if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
-                    }
+                    current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
                 }
             }
-        }
-    }
-    // Simple normalization/clipping pass
+        } // End HI-HATS for bar_idx
+    } // End BAR loop
+    
     for i_clamp in 0..<DRUM_TRACK_TOTAL_FRAMES { 
         drum_track_pcm_data[i_clamp] = math.clamp(drum_track_pcm_data[i_clamp], -0.95, 0.95);
     }
-
     fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---");
 
     // Sokol Audio Setup
     sokol_audio_desc := sa.Desc {
-        sample_rate = LMB_SOUND_SAMPLE_RATE, // Use new constant
-        num_channels = LMB_SOUND_CHANNELS,   // Use new constant
+        sample_rate = LMB_SOUND_SAMPLE_RATE, 
+        num_channels = LMB_SOUND_CHANNELS,   
         buffer_frames = 1024, 
         packet_frames = 0,    
         num_packets = 0,      
@@ -521,8 +528,8 @@ init :: proc "c" () {
     // Miniaudio Engine Setup
     engine_config := ma.engine_config_init()
     engine_config.noDevice = true 
-    engine_config.channels = u32(LMB_SOUND_CHANNELS)   // Use new constant
-    engine_config.sampleRate = u32(LMB_SOUND_SAMPLE_RATE) // Use new constant
+    engine_config.channels = u32(LMB_SOUND_CHANNELS)   
+    engine_config.sampleRate = u32(LMB_SOUND_SAMPLE_RATE) 
 
     init_result := ma.engine_init(&engine_config, &state.audio_engine)
     if init_result != .SUCCESS {
@@ -533,47 +540,46 @@ init :: proc "c" () {
 
     // Generate "Pew" Sound PCM Data
     fmt.printf("--- Generating 'Pew' sound PCM data... ---\n")
-    current_phase: f64 = 0.0 
+    current_phase_lmb: f64 = 0.0 // Renamed to avoid conflict
    
     for i in 0..<LMB_SOUND_FRAMES {
         progress := f64(i) / f64(LMB_SOUND_FRAMES)
-
-        amplitude: f64
-        attack_time := 0.15 // New, longer attack_time (15% of total duration)
-        if progress < attack_time {
-            amplitude = progress / attack_time
+        amplitude_lmb: f64 // Renamed
+        attack_time_lmb := 0.15 
+        if progress < attack_time_lmb {
+            amplitude_lmb = progress / attack_time_lmb
         } else {
-            amplitude = 1.0 - (progress - attack_time) / (1.0 - attack_time)
+            amplitude_lmb = 1.0 - (progress - attack_time_lmb) / (1.0 - attack_time_lmb)
         }
-        amplitude = math.max(0.0, amplitude) 
+        amplitude_lmb = math.max(0.0, amplitude_lmb) 
 
-        ratio := LMB_SOUND_END_FREQ / LMB_SOUND_START_FREQ
-        exponent := progress
-        current_freq_f64 := f64(LMB_SOUND_START_FREQ) * math.pow(f64(ratio), exponent)
+        ratio_lmb := LMB_SOUND_END_FREQ / LMB_SOUND_START_FREQ // Renamed
+        exponent_lmb := progress // Renamed
+        current_freq_f64_lmb := f64(LMB_SOUND_START_FREQ) * math.pow(f64(ratio_lmb), exponent_lmb) // Renamed
 
-        sample_val_f64 := math.sin(current_phase)
+        sample_val_f64_lmb := math.sin(current_phase_lmb) // Renamed
        
-        lmb_sound_pcm_data[i] = f32(sample_val_f64 * amplitude * f64(LMB_SOUND_AMPLITUDE))
+        lmb_sound_pcm_data[i] = f32(sample_val_f64_lmb * amplitude_lmb * f64(LMB_SOUND_AMPLITUDE))
 
-        current_phase += (2.0 * f64(math.PI) * current_freq_f64) / f64(LMB_SOUND_SAMPLE_RATE)
-        if current_phase >= (2.0 * f64(math.PI)) {
-            current_phase -= (2.0 * f64(math.PI))
+        current_phase_lmb += (2.0 * f64(math.PI) * current_freq_f64_lmb) / f64(LMB_SOUND_SAMPLE_RATE)
+        if current_phase_lmb >= (2.0 * f64(math.PI)) {
+            current_phase_lmb -= (2.0 * f64(math.PI))
         }
     }
     fmt.printf("--- 'Pew' sound PCM data generated. First sample: %v, Mid sample: %v, Last sample: %v ---\n", lmb_sound_pcm_data[0], lmb_sound_pcm_data[LMB_SOUND_FRAMES/2], lmb_sound_pcm_data[LMB_SOUND_FRAMES-1])
 
-    audio_buffer_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_SOUND_FRAMES), rawptr(&lmb_sound_pcm_data[0]), nil)
-    init_ab_result := ma.audio_buffer_init_copy(&audio_buffer_config, &lmb_sound_audio_buffer) 
-    if init_ab_result != .SUCCESS {
-        fmt.eprintf("!!! CRITICAL: Miniaudio audio_buffer_init_copy for LMB sound failed! Error: %v\n", init_ab_result)
+    audio_buffer_config_lmb := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_SOUND_FRAMES), rawptr(&lmb_sound_pcm_data[0]), nil) // Renamed
+    init_ab_result_lmb := ma.audio_buffer_init_copy(&audio_buffer_config_lmb, &lmb_sound_audio_buffer) // Renamed
+    if init_ab_result_lmb != .SUCCESS {
+        fmt.eprintf("!!! CRITICAL: Miniaudio audio_buffer_init_copy for LMB sound failed! Error: %v\n", init_ab_result_lmb)
     } else {
         fmt.printf("--- Miniaudio audio_buffer initialized for LMB sound ---\n")
-        sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } 
-        p_data_source_for_sound := (^ma.data_source)(&lmb_sound_audio_buffer)
+        sound_flags_lmb: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } // Renamed
+        p_data_source_for_lmb_sound := (^ma.data_source)(&lmb_sound_audio_buffer) // Renamed
 
-        init_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_for_sound, sound_flags, nil, &state.lmb_sound)
-        if init_sound_result != .SUCCESS {
-            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_sound failed! Error: %v\n", init_sound_result)
+        init_sound_result_lmb := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_for_lmb_sound, sound_flags_lmb, nil, &state.lmb_sound) // Renamed
+        if init_sound_result_lmb != .SUCCESS {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_sound failed! Error: %v\n", init_sound_result_lmb)
             ma.audio_buffer_uninit(&lmb_sound_audio_buffer); 
         } else {
             fmt.printf("--- Miniaudio lmb_sound initialized successfully ---\n")
@@ -581,96 +587,59 @@ init :: proc "c" () {
     }
 
     fmt.printf("--- Initializing RMB Particle Sounds ---\n")
-
-    // Generate Hum PCM Data (Loopable Sine Wave)
-    hum_waveform_config := ma.waveform_config_init(
-        ma.format.f32, 
-        u32(LMB_SOUND_CHANNELS), // Assuming mono for particle sounds for now
-        u32(LMB_SOUND_SAMPLE_RATE), 
-        ma.waveform_type.sine, // Use .sine for ma.waveform_type.sine
-        f64(RMB_HUM_AMPLITUDE), 
-        f64(RMB_HUM_FREQUENCY),
-    )
+    hum_waveform_config := ma.waveform_config_init( ma.format.f32, u32(LMB_SOUND_CHANNELS), u32(LMB_SOUND_SAMPLE_RATE), ma.waveform_type.sine, f64(RMB_HUM_AMPLITUDE), f64(RMB_HUM_FREQUENCY))
     hum_sine_wave_gen: ma.waveform
     init_hum_wf_result := ma.waveform_init(&hum_waveform_config, &hum_sine_wave_gen)
     if init_hum_wf_result == .SUCCESS {
         frames_read_hum: u64
         ma.waveform_read_pcm_frames(&hum_sine_wave_gen, rawptr(&rmb_hum_pcm_data[0]), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), &frames_read_hum)
-        ma.waveform_uninit(&hum_sine_wave_gen) // Uninit after use
+        ma.waveform_uninit(&hum_sine_wave_gen) 
         fmt.printf("--- RMB Hum PCM data generated (%v frames). ---\n", frames_read_hum)
     } else {
         fmt.eprintf("!!! CRITICAL: Miniaudio waveform_init for RMB Hum failed! Error: %v\n", init_hum_wf_result)
     }
 
-    // Generate Whoosh PCM Data (White Noise)
-    whoosh_noise_config := ma.noise_config_init(
-        ma.format.f32,
-        u32(LMB_SOUND_CHANNELS), // Assuming mono
-        ma.noise_type.pink, // Use .pink for ma.noise_type.pink (Changed from white to pink)
-        0, // seed
-        f64(RMB_WHOOSH_AMPLITUDE),
-    )
+    whoosh_noise_config := ma.noise_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), ma.noise_type.pink, 0, f64(RMB_WHOOSH_AMPLITUDE))
     whoosh_noise_gen: ma.noise
-    // The ma_noise_init function expects the sample rate as a separate parameter, not within the config.
-    // Corrected: Second argument should be pAllocationCallbacks, which is nil here. Sample rate is part of config.
     init_whoosh_noise_result := ma.noise_init(&whoosh_noise_config, nil, &whoosh_noise_gen)
     if init_whoosh_noise_result == .SUCCESS {
         frames_read_whoosh: u64
         ma.noise_read_pcm_frames(&whoosh_noise_gen, rawptr(&rmb_whoosh_pcm_data[0]), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), &frames_read_whoosh)
-        ma.noise_uninit(&whoosh_noise_gen, nil) // Uninit after use
+        ma.noise_uninit(&whoosh_noise_gen, nil) 
         fmt.printf("--- RMB Whoosh PCM data generated (%v frames). ---\n", frames_read_whoosh)
     } else {
         fmt.eprintf("!!! CRITICAL: Miniaudio noise_init for RMB Whoosh failed! Error: %v\n", init_whoosh_noise_result)
     }
 
-    // Initialize Miniaudio audio_buffers for hum and whoosh
     hum_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), rawptr(&rmb_hum_pcm_data[0]), nil)
     init_hum_ab_result := ma.audio_buffer_init_copy(&hum_ab_config, &rmb_hum_audio_buffer)
-    if init_hum_ab_result == .SUCCESS {
-        fmt.printf("--- RMB Hum audio_buffer initialized. ---\n")
-    } else {
-        fmt.eprintf("!!! CRITICAL: RMB Hum audio_buffer_init_copy failed! Error: %v\n", init_hum_ab_result)
-    }
+    if init_hum_ab_result == .SUCCESS { fmt.printf("--- RMB Hum audio_buffer initialized. ---\n") } 
+    else { fmt.eprintf("!!! CRITICAL: RMB Hum audio_buffer_init_copy failed! Error: %v\n", init_hum_ab_result) }
 
     whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), rawptr(&rmb_whoosh_pcm_data[0]), nil)
     init_whoosh_ab_result := ma.audio_buffer_init_copy(&whoosh_ab_config, &rmb_whoosh_audio_buffer)
-    if init_whoosh_ab_result == .SUCCESS {
-        fmt.printf("--- RMB Whoosh audio_buffer initialized. ---\n")
-    } else {
-        fmt.eprintf("!!! CRITICAL: RMB Whoosh audio_buffer_init_copy failed! Error: %v\n", init_whoosh_ab_result)
-    }
+    if init_whoosh_ab_result == .SUCCESS { fmt.printf("--- RMB Whoosh audio_buffer initialized. ---\n") } 
+    else { fmt.eprintf("!!! CRITICAL: RMB Whoosh audio_buffer_init_copy failed! Error: %v\n", init_whoosh_ab_result) }
     fmt.printf("--- RMB Particle Sounds Initialized ---\n")
 
-    // Generate Enemy Hit Sound PCM Data
     fmt.printf("--- Generating 'Enemy Hit' sound PCM data... ---\n")
     current_phase_enemy_hit: f64 = 0.0
     for i in 0..<ENEMY_HIT_SOUND_FRAMES {
-        progress := f64(i) / f64(ENEMY_HIT_SOUND_FRAMES)
-        
-        amplitude: f64
-        attack_time := 0.1 // Quick attack
-        if progress < attack_time {
-            amplitude = progress / attack_time
-        } else {
-            amplitude = 1.0 - (progress - attack_time) / (1.0 - attack_time)
-        }
-        amplitude = math.max(0.0, amplitude)
-
-        ratio := ENEMY_HIT_SOUND_END_FREQ / ENEMY_HIT_SOUND_START_FREQ
-        exponent := progress
-        current_freq_f64 := f64(ENEMY_HIT_SOUND_START_FREQ) * math.pow(f64(ratio), exponent)
-        
-        sample_val_f64 := math.sin(current_phase_enemy_hit)
-        enemy_hit_sound_pcm_data[i] = f32(sample_val_f64 * amplitude * f64(ENEMY_HIT_SOUND_AMPLITUDE))
-        
-        current_phase_enemy_hit += (2.0 * f64(math.PI) * current_freq_f64) / f64(LMB_SOUND_SAMPLE_RATE)
-        if current_phase_enemy_hit >= (2.0 * f64(math.PI)) {
-            current_phase_enemy_hit -= (2.0 * f64(math.PI))
-        }
+        progress_eh := f64(i) / f64(ENEMY_HIT_SOUND_FRAMES) // Renamed progress
+        amplitude_eh: f64 // Renamed
+        attack_time_eh := 0.1 
+        if progress_eh < attack_time_eh { amplitude_eh = progress_eh / attack_time_eh } 
+        else { amplitude_eh = 1.0 - (progress_eh - attack_time_eh) / (1.0 - attack_time_eh) }
+        amplitude_eh = math.max(0.0, amplitude_eh)
+        ratio_eh := ENEMY_HIT_SOUND_END_FREQ / ENEMY_HIT_SOUND_START_FREQ // Renamed
+        current_freq_f64_eh := f64(ENEMY_HIT_SOUND_START_FREQ) * math.pow(f64(ratio_eh), progress_eh) // Renamed
+        sample_val_f64_eh := math.sin(current_phase_enemy_hit) // Renamed
+        enemy_hit_sound_pcm_data[i] = f32(sample_val_f64_eh * amplitude_eh * f64(ENEMY_HIT_SOUND_AMPLITUDE))
+        current_phase_enemy_hit += (2.0 * f64(math.PI) * current_freq_f64_eh) / f64(LMB_SOUND_SAMPLE_RATE)
+        if current_phase_enemy_hit >= (2.0 * f64(math.PI)) { current_phase_enemy_hit -= (2.0 * f64(math.PI)) }
     }
     fmt.printf("--- 'Enemy Hit' sound PCM data generated. ---\n")
 
-    // Initialize Miniaudio audio_buffer for enemy_hit_sound
     enemy_hit_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(ENEMY_HIT_SOUND_FRAMES), rawptr(&enemy_hit_sound_pcm_data[0]), nil)
     init_enemy_hit_ab_result := ma.audio_buffer_init_copy(&enemy_hit_ab_config, &enemy_hit_sound_audio_buffer)
     if init_enemy_hit_ab_result == .SUCCESS {
@@ -683,56 +652,40 @@ init :: proc "c" () {
             fmt.printf("--- Miniaudio rmb_hit_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_HIT_SOUND_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_hit_sound failed! Error: %v\n", init_rmb_hit_sound_result);
-            ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); // Cleanup its buffer
+            ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); 
         }
     } else {
         fmt.eprintf("!!! CRITICAL: Enemy Hit audio_buffer_init_copy failed! Error: %v\n", init_enemy_hit_ab_result)
     }
 
-    // Generate Enemy Death Sound PCM Data
     fmt.printf("--- Generating 'Enemy Death' sound PCM data... ---\n")
     current_phase_enemy_death_sine: f64 = 0.0
-    rng_seed: u64 = 12345 // Fixed seed for reproducibility, or use time-based for variation
-    // 1. Create a Default_Random_State
-    death_sound_rng_state := rand.create(rng_seed) 
-    // 2. Create a Random_Generator from this state
+    rng_seed_ed: u64 = 12345 // Renamed
+    death_sound_rng_state := rand.create(rng_seed_ed) 
     death_sound_generator := runtime.default_random_generator(&death_sound_rng_state)
-
-
     for i in 0..<ENEMY_DEATH_SOUND_FRAMES {
-        if i < ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES { // Ensure this uses the renamed constant if that was part of an earlier fix
-            progress_noise := f32(i) / f32(ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES) // Ensure this uses the renamed constant
-            decay_noise := (1.0 - progress_noise) 
-            decay_noise = math.max(0.0, decay_noise) 
-            // 3. Pass the new generator to rand.float32()
-            random_sample := (rand.float32(death_sound_generator) * 2.0 - 1.0) // Generate [-1, 1]
-            enemy_death_sound_pcm_data[i] = random_sample * ENEMY_DEATH_SOUND_NOISE_AMPLITUDE * decay_noise
+        if i < ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES { 
+            progress_noise_ed := f32(i) / f32(ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES) // Renamed
+            decay_noise_ed := (1.0 - progress_noise_ed) // Renamed
+            decay_noise_ed = math.max(0.0, decay_noise_ed) 
+            random_sample_ed := (rand.float32(death_sound_generator) * 2.0 - 1.0) // Renamed
+            enemy_death_sound_pcm_data[i] = random_sample_ed * ENEMY_DEATH_SOUND_NOISE_AMPLITUDE * decay_noise_ed
         } else {
-            // Sine wave for the remainder
-            sine_progress_frames := i - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES
-            total_sine_frames := ENEMY_DEATH_SOUND_FRAMES - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES
-            progress_sine := f64(sine_progress_frames) / f64(total_sine_frames)
-
-            // Amplitude envelope for sine (decay)
-            amplitude_sine_decay := 1.0 - progress_sine 
-            amplitude_sine_decay = math.max(0.0, amplitude_sine_decay) // Ensure non-negative
-
-            ratio_sine := ENEMY_DEATH_SOUND_SINE_END_FREQ / ENEMY_DEATH_SOUND_SINE_START_FREQ
-            exponent_sine := progress_sine
-            current_freq_sine_f64 := f64(ENEMY_DEATH_SOUND_SINE_START_FREQ) * math.pow(f64(ratio_sine), exponent_sine)
-            
-            sample_val_sine_f64 := math.sin(current_phase_enemy_death_sine)
-            enemy_death_sound_pcm_data[i] = f32(sample_val_sine_f64 * amplitude_sine_decay * f64(ENEMY_DEATH_SOUND_SINE_AMPLITUDE))
-            
-            current_phase_enemy_death_sine += (2.0 * f64(math.PI) * current_freq_sine_f64) / f64(LMB_SOUND_SAMPLE_RATE)
-            if current_phase_enemy_death_sine >= (2.0 * f64(math.PI)) {
-                current_phase_enemy_death_sine -= (2.0 * f64(math.PI))
-            }
+            sine_progress_frames_ed := i - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES // Renamed
+            total_sine_frames_ed := ENEMY_DEATH_SOUND_FRAMES - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES // Renamed
+            progress_sine_ed := f64(sine_progress_frames_ed) / f64(total_sine_frames_ed) // Renamed
+            amplitude_sine_decay_ed := 1.0 - progress_sine_ed // Renamed
+            amplitude_sine_decay_ed = math.max(0.0, amplitude_sine_decay_ed) 
+            ratio_sine_ed := ENEMY_DEATH_SOUND_SINE_END_FREQ / ENEMY_DEATH_SOUND_SINE_START_FREQ // Renamed
+            current_freq_sine_f64_ed := f64(ENEMY_DEATH_SOUND_SINE_START_FREQ) * math.pow(f64(ratio_sine_ed), progress_sine_ed) // Renamed
+            sample_val_sine_f64_ed := math.sin(current_phase_enemy_death_sine) // Renamed
+            enemy_death_sound_pcm_data[i] = f32(sample_val_sine_f64_ed * amplitude_sine_decay_ed * f64(ENEMY_DEATH_SOUND_SINE_AMPLITUDE))
+            current_phase_enemy_death_sine += (2.0 * f64(math.PI) * current_freq_sine_f64_ed) / f64(LMB_SOUND_SAMPLE_RATE)
+            if current_phase_enemy_death_sine >= (2.0 * f64(math.PI)) { current_phase_enemy_death_sine -= (2.0 * f64(math.PI)) }
         }
     }
     fmt.printf("--- 'Enemy Death' sound PCM data generated. ---\n")
 
-    // Initialize Miniaudio audio_buffer for enemy_death_sound
     enemy_death_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(ENEMY_DEATH_SOUND_FRAMES), rawptr(&enemy_death_sound_pcm_data[0]), nil)
     init_enemy_death_ab_result := ma.audio_buffer_init_copy(&enemy_death_ab_config, &enemy_death_sound_audio_buffer)
     if init_enemy_death_ab_result == .SUCCESS {
@@ -745,239 +698,220 @@ init :: proc "c" () {
             fmt.printf("--- Miniaudio rmb_kill_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_kill_sound failed! Error: %v\n", init_rmb_kill_sound_result);
-            ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); // Cleanup its buffer
+            ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); 
         }
     } else {
         fmt.eprintf("!!! CRITICAL: Enemy Death audio_buffer_init_copy failed! Error: %v\n", init_enemy_death_ab_result)
     }
 
-        // Generate LMB Hit Whoosh Sound PCM Data
-        fmt.printf("--- Generating 'LMB Hit Whoosh' sound PCM data... ---\n")
-        lmb_hit_rng_seed: u64 = 67890 // Different seed
-        lmb_hit_rng_state := rand.create(lmb_hit_rng_seed)
-        lmb_hit_generator := runtime.default_random_generator(&lmb_hit_rng_state)
-        for i in 0..<LMB_HIT_WHOOSH_DURATION_FRAMES {
-            progress := f32(i) / f32(LMB_HIT_WHOOSH_DURATION_FRAMES)
-            amplitude_envelope: f32
-            attack_time_whoosh : f32 = 0.05 // Very quick attack
-            decay_time_whoosh : f32 = 0.95 // Rest is decay
-            
-            if progress < attack_time_whoosh {
-                amplitude_envelope = progress / attack_time_whoosh
-            } else {
-                amplitude_envelope = 1.0 - (progress - attack_time_whoosh) / decay_time_whoosh
-            }
-            amplitude_envelope = math.max(0.0, amplitude_envelope) // Ensure non-negative
-            
-            random_sample := (rand.float32(lmb_hit_generator) * 2.0 - 1.0) // White noise
-            lmb_hit_whoosh_pcm_data[i] = random_sample * LMB_HIT_WHOOSH_AMPLITUDE * amplitude_envelope
-        }
-        fmt.printf("--- 'LMB Hit Whoosh' sound PCM data generated. ---\n")
+    fmt.printf("--- Generating 'LMB Hit Whoosh' sound PCM data... ---\n")
+    lmb_hit_rng_seed: u64 = 67890 
+    lmb_hit_rng_state := rand.create(lmb_hit_rng_seed)
+    lmb_hit_generator := runtime.default_random_generator(&lmb_hit_rng_state)
+    for i in 0..<LMB_HIT_WHOOSH_DURATION_FRAMES {
+        progress_lhw := f32(i) / f32(LMB_HIT_WHOOSH_DURATION_FRAMES) // Renamed
+        amplitude_envelope_lhw: f32 // Renamed
+        attack_time_whoosh_lhw : f32 = 0.05 // Renamed
+        decay_time_whoosh_lhw : f32 = 0.95 // Renamed
+        if progress_lhw < attack_time_whoosh_lhw { amplitude_envelope_lhw = progress_lhw / attack_time_whoosh_lhw } 
+        else { amplitude_envelope_lhw = 1.0 - (progress_lhw - attack_time_whoosh_lhw) / decay_time_whoosh_lhw }
+        amplitude_envelope_lhw = math.max(0.0, amplitude_envelope_lhw) 
+        random_sample_lhw := (rand.float32(lmb_hit_generator) * 2.0 - 1.0) // Renamed
+        lmb_hit_whoosh_pcm_data[i] = random_sample_lhw * LMB_HIT_WHOOSH_AMPLITUDE * amplitude_envelope_lhw
+    }
+    fmt.printf("--- 'LMB Hit Whoosh' sound PCM data generated. ---\n")
 
-        // Initialize Miniaudio audio_buffer for lmb_hit_whoosh_sound
-        lmb_hit_whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_HIT_WHOOSH_DURATION_FRAMES), rawptr(&lmb_hit_whoosh_pcm_data[0]), nil)
-        init_lmb_hit_whoosh_ab_result := ma.audio_buffer_init_copy(&lmb_hit_whoosh_ab_config, &lmb_hit_whoosh_audio_buffer)
-        if init_lmb_hit_whoosh_ab_result == .SUCCESS {
-            fmt.printf("--- LMB Hit Whoosh audio_buffer initialized. ---\n")
-            sound_flags_lmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
-            p_data_source_lmb_hit := (^ma.data_source)(&lmb_hit_whoosh_audio_buffer);
-            init_lmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_hit, sound_flags_lmb_hit, nil, &state.lmb_hit_sound);
-            if init_lmb_hit_sound_result == .SUCCESS {
-                ma.sound_set_volume(&state.lmb_hit_sound, LMB_HIT_WHOOSH_AMPLITUDE);
-                fmt.printf("--- Miniaudio lmb_hit_sound initialized successfully (Volume: %.2f) ---\n", LMB_HIT_WHOOSH_AMPLITUDE);
-            } else {
-                fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_hit_sound failed! Error: %v\n", init_lmb_hit_sound_result);
-                ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); // Cleanup its buffer if sound init fails
-            }
+    lmb_hit_whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_HIT_WHOOSH_DURATION_FRAMES), rawptr(&lmb_hit_whoosh_pcm_data[0]), nil)
+    init_lmb_hit_whoosh_ab_result := ma.audio_buffer_init_copy(&lmb_hit_whoosh_ab_config, &lmb_hit_whoosh_audio_buffer)
+    if init_lmb_hit_whoosh_ab_result == .SUCCESS {
+        fmt.printf("--- LMB Hit Whoosh audio_buffer initialized. ---\n")
+        sound_flags_lmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+        p_data_source_lmb_hit := (^ma.data_source)(&lmb_hit_whoosh_audio_buffer);
+        init_lmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_hit, sound_flags_lmb_hit, nil, &state.lmb_hit_sound);
+        if init_lmb_hit_sound_result == .SUCCESS {
+            ma.sound_set_volume(&state.lmb_hit_sound, LMB_HIT_WHOOSH_AMPLITUDE);
+            fmt.printf("--- Miniaudio lmb_hit_sound initialized successfully (Volume: %.2f) ---\n", LMB_HIT_WHOOSH_AMPLITUDE);
         } else {
-            fmt.eprintf("!!! CRITICAL: LMB Hit Whoosh audio_buffer_init_copy failed! Error: %v\n", init_lmb_hit_whoosh_ab_result)
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_hit_sound failed! Error: %v\n", init_lmb_hit_sound_result);
+            ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); 
         }
+    } else {
+        fmt.eprintf("!!! CRITICAL: LMB Hit Whoosh audio_buffer_init_copy failed! Error: %v\n", init_lmb_hit_whoosh_ab_result)
+    }
 
-        // Generate LMB Kill Explosion Sound PCM Data
-        fmt.printf("--- Generating 'LMB Kill Explosion' sound PCM data... ---\n")
-        lmb_kill_rng_seed: u64 = 78901 // Different seed
-        lmb_kill_rng_state := rand.create(lmb_kill_rng_seed)
-        lmb_kill_generator := runtime.default_random_generator(&lmb_kill_rng_state)
-        
-        // Explosion: Short noise burst, then a fast decaying low sine wave
-        EXPLOSION_NOISE_FRAMES :: LMB_KILL_EXPLOSION_DURATION_FRAMES / 5 // e.g., 1/5th of duration for noise
-        EXPLOSION_SINE_START_FREQ :: 150.0
-        EXPLOSION_SINE_END_FREQ :: 40.0
-        current_phase_lmb_kill_sine: f64 = 0.0
-
-        for i in 0..<LMB_KILL_EXPLOSION_DURATION_FRAMES {
-            if i < EXPLOSION_NOISE_FRAMES {
-                progress_noise := f32(i) / f32(EXPLOSION_NOISE_FRAMES)
-                decay_noise := (1.0 - progress_noise) * (1.0 - progress_noise) // Faster decay for noise
-                decay_noise = math.max(0.0, decay_noise)
-                random_sample := (rand.float32(lmb_kill_generator) * 2.0 - 1.0)
-                lmb_kill_explosion_pcm_data[i] = random_sample * LMB_KILL_EXPLOSION_AMPLITUDE * decay_noise * 0.7 // Noise part a bit quieter
-            } else {
-                sine_progress_frames := i - EXPLOSION_NOISE_FRAMES
-                total_sine_frames := LMB_KILL_EXPLOSION_DURATION_FRAMES - EXPLOSION_NOISE_FRAMES
-                progress_sine := f64(sine_progress_frames) / f64(total_sine_frames)
-
-                amplitude_sine_decay := math.pow(1.0 - progress_sine, 3.0) // Strong exponential decay
-                amplitude_sine_decay = math.max(0.0, amplitude_sine_decay)
-
-                ratio_sine := EXPLOSION_SINE_END_FREQ / EXPLOSION_SINE_START_FREQ
-                current_freq_sine_f64 := EXPLOSION_SINE_START_FREQ * math.pow(ratio_sine, progress_sine)
-                
-                sample_val_sine_f64 := math.sin(current_phase_lmb_kill_sine)
-                lmb_kill_explosion_pcm_data[i] = f32(sample_val_sine_f64 * amplitude_sine_decay * f64(LMB_KILL_EXPLOSION_AMPLITUDE))
-                
-                current_phase_lmb_kill_sine += (2.0 * f64(math.PI) * current_freq_sine_f64) / f64(LMB_SOUND_SAMPLE_RATE)
-                if current_phase_lmb_kill_sine >= (2.0 * f64(math.PI)) {
-                    current_phase_lmb_kill_sine -= (2.0 * f64(math.PI))
-                }
-            }
-        }
-        fmt.printf("--- 'LMB Kill Explosion' sound PCM data generated. ---\n")
-
-        // Initialize Miniaudio audio_buffer for lmb_kill_explosion_sound
-        lmb_kill_explosion_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_KILL_EXPLOSION_DURATION_FRAMES), rawptr(&lmb_kill_explosion_pcm_data[0]), nil)
-        init_lmb_kill_explosion_ab_result := ma.audio_buffer_init_copy(&lmb_kill_explosion_ab_config, &lmb_kill_explosion_audio_buffer)
-        if init_lmb_kill_explosion_ab_result == .SUCCESS {
-            fmt.printf("--- LMB Kill Explosion audio_buffer initialized. ---\n")
-            sound_flags_lmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
-            p_data_source_lmb_kill := (^ma.data_source)(&lmb_kill_explosion_audio_buffer);
-            init_lmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_kill, sound_flags_lmb_kill, nil, &state.lmb_kill_sound);
-            if init_lmb_kill_sound_result == .SUCCESS {
-                ma.sound_set_volume(&state.lmb_kill_sound, LMB_KILL_EXPLOSION_AMPLITUDE);
-                fmt.printf("--- Miniaudio lmb_kill_sound initialized successfully (Volume: %.2f) ---\n", LMB_KILL_EXPLOSION_AMPLITUDE);
-            } else {
-                fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_kill_sound failed! Error: %v\n", init_lmb_kill_sound_result);
-                ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); // Cleanup its buffer
-            }
+    fmt.printf("--- Generating 'LMB Kill Explosion' sound PCM data... ---\n")
+    lmb_kill_rng_seed: u64 = 78901 
+    lmb_kill_rng_state := rand.create(lmb_kill_rng_seed)
+    lmb_kill_generator := runtime.default_random_generator(&lmb_kill_rng_state)
+    EXPLOSION_NOISE_FRAMES :: LMB_KILL_EXPLOSION_DURATION_FRAMES / 5 
+    EXPLOSION_SINE_START_FREQ_lke :: 150.0 // Renamed
+    EXPLOSION_SINE_END_FREQ_lke :: 40.0   // Renamed
+    current_phase_lmb_kill_sine: f64 = 0.0
+    for i in 0..<LMB_KILL_EXPLOSION_DURATION_FRAMES {
+        if i < EXPLOSION_NOISE_FRAMES {
+            progress_noise_lke := f32(i) / f32(EXPLOSION_NOISE_FRAMES) // Renamed
+            decay_noise_lke := (1.0 - progress_noise_lke) * (1.0 - progress_noise_lke) // Renamed
+            decay_noise_lke = math.max(0.0, decay_noise_lke)
+            random_sample_lke := (rand.float32(lmb_kill_generator) * 2.0 - 1.0) // Renamed
+            lmb_kill_explosion_pcm_data[i] = random_sample_lke * LMB_KILL_EXPLOSION_AMPLITUDE * decay_noise_lke * 0.7 
         } else {
-            fmt.eprintf("!!! CRITICAL: LMB Kill Explosion audio_buffer_init_copy failed! Error: %v\n", init_lmb_kill_explosion_ab_result)
-        }
-
-    // Generate Revised Placeholder Drum Track PCM Data
-    fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---\n")
-    
-    // Define simple drum sound characteristics (as variables, using values calculated earlier in init)
-    KICK_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
-    // KICK_START_FREQ, KICK_END_FREQ, KICK_AMPLITUDE are global constants, no change needed here
-    
-    SNARE_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 6;
-    // SNARE_START_FREQ, SNARE_AMPLITUDE are global constants
-
-    HIHAT_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 16;
-    // HIHAT_FREQ, HIHAT_AMPLITUDE are global constants
-
-    // Zero out the buffer first, as we are adding to it
-    // Ensure DRUM_TRACK_TOTAL_FRAMES is correctly calculated at the start of init()
-    if len(drum_track_pcm_data) != DRUM_TRACK_TOTAL_FRAMES {
-        fmt.eprintf("!!! ERROR: drum_track_pcm_data slice length (%d) does not match DRUM_TRACK_TOTAL_FRAMES (%d) before zeroing!\n", len(drum_track_pcm_data), DRUM_TRACK_TOTAL_FRAMES)
-        // Handle error or return if critical, though allocation should ensure this.
-    }
-    for i in 0..<DRUM_TRACK_TOTAL_FRAMES { 
-        drum_track_pcm_data[i] = 0.0;
-    }
-
-    // Generate PCM data bar by bar, beat by beat
-    for bar in 0..<DRUM_TRACK_NUM_BARS {
-        for beat in 0..<DRUM_TRACK_BEATS_PER_BAR {
-            beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + (beat * DRUM_TRACK_FRAMES_PER_BEAT);
-
-            // --- KICK DRUM (on beats 1 and 3, i.e., beat index 0 and 2) ---
-            if beat == 0 || beat == 2 {
-                current_phase_kick: f64 = 0.0;
-                for kick_i in 0..<KICK_DURATION_FRAMES {
-                    frame_in_track := beat_start_frame + kick_i;
-                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
-
-                    progress: f64 = f64(kick_i) / f64(KICK_DURATION_FRAMES);
-                    amplitude_kick: f64 = math.pow_f64(f64(1.0) - progress, 2.5);
-                    amplitude_kick = math.max(0.0, amplitude_kick); // Ensure non-negative
-                    current_freq_kick: f64 = f64(KICK_START_FREQ) * math.pow_f64(f64(KICK_END_FREQ) / f64(KICK_START_FREQ), progress);
-                    
-                    sample_val_kick: f64 = math.sin(current_phase_kick);
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick * f64(KICK_AMPLITUDE));
-                    
-                    current_phase_kick += (2.0 * f64(math.PI) * current_freq_kick) / f64(DRUM_TRACK_SAMPLE_RATE);
-                    if current_phase_kick >= (2.0 * f64(math.PI)) { current_phase_kick -= (2.0 * f64(math.PI)) }
-                }
-            }
-
-            // --- SNARE DRUM (on beats 2 and 4, i.e., beat index 1 and 3) ---
-            if beat == 1 || beat == 3 {
-                current_phase_snare: f64 = 0.0;
-                for snare_i in 0..<SNARE_DURATION_FRAMES {
-                    frame_in_track := beat_start_frame + snare_i;
-                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
-
-                    progress: f64 = f64(snare_i) / f64(SNARE_DURATION_FRAMES);
-                    amplitude_snare: f64 = math.pow_f64(f64(1.0) - progress, 3.5); 
-                    amplitude_snare = math.max(0.0, amplitude_snare);
-                    
-                    sample_val_snare: f64 = math.sin(current_phase_snare);
-                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare * f64(SNARE_AMPLITUDE));
-                    
-                    current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
-                    if current_phase_snare >= (2.0 * f64(math.PI)) { current_phase_snare -= (2.0 * f64(math.PI)) }
-                }
-            }
-
-            // --- HI-HATS (on every 8th note, skipping main kick/snare beats) ---
-            for eighth_note in 0..<(DRUM_TRACK_BEATS_PER_BAR * 2) { 
-                eighth_note_offset_frames := eighth_note * (DRUM_TRACK_FRAMES_PER_BEAT / 2);
-                hihat_beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + eighth_note_offset_frames;
-                
-                on_main_kick_pos := (eighth_note == 0 || eighth_note == 4);
-                on_main_snare_pos := (eighth_note == 2 || eighth_note == 6);
-
-                if on_main_kick_pos || on_main_snare_pos { 
-                    // Skip
-                } else {
-                    current_phase_hihat: f64 = 0.0;
-                    for hihat_i in 0..<HIHAT_DURATION_FRAMES {
-                        frame_in_track := hihat_beat_start_frame + hihat_i;
-                        if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
-
-                        progress: f64 = f64(hihat_i) / f64(HIHAT_DURATION_FRAMES);
-                        amplitude_hihat: f64 = math.pow_f64(f64(1.0) - progress, 2.0); 
-                        amplitude_hihat = math.max(0.0, amplitude_hihat);
-
-                        sample_val_hihat: f64 = math.sin(current_phase_hihat);
-                        drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat * f64(HIHAT_AMPLITUDE));
-
-                        current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
-                        if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
-                    }
-                }
-            }
+            sine_progress_frames_lke := i - EXPLOSION_NOISE_FRAMES // Renamed
+            total_sine_frames_lke := LMB_KILL_EXPLOSION_DURATION_FRAMES - EXPLOSION_NOISE_FRAMES // Renamed
+            progress_sine_lke := f64(sine_progress_frames_lke) / f64(total_sine_frames_lke) // Renamed
+            amplitude_sine_decay_lke := math.pow(1.0 - progress_sine_lke, 3.0) // Renamed
+            amplitude_sine_decay_lke = math.max(0.0, amplitude_sine_decay_lke)
+            ratio_sine_lke := EXPLOSION_SINE_END_FREQ_lke / EXPLOSION_SINE_START_FREQ_lke // Renamed
+            current_freq_sine_f64_lke := EXPLOSION_SINE_START_FREQ_lke * math.pow(ratio_sine_lke, progress_sine_lke) // Renamed
+            sample_val_sine_f64_lke := math.sin(current_phase_lmb_kill_sine) // Renamed
+            lmb_kill_explosion_pcm_data[i] = f32(sample_val_sine_f64_lke * amplitude_sine_decay_lke * f64(LMB_KILL_EXPLOSION_AMPLITUDE))
+            current_phase_lmb_kill_sine += (2.0 * f64(math.PI) * current_freq_sine_f64_lke) / f64(LMB_SOUND_SAMPLE_RATE)
+            if current_phase_lmb_kill_sine >= (2.0 * f64(math.PI)) { current_phase_lmb_kill_sine -= (2.0 * f64(math.PI)) }
         }
     }
-    // Simple normalization/clipping pass
-    for i in 0..<DRUM_TRACK_TOTAL_FRAMES {
-        drum_track_pcm_data[i] = math.clamp(drum_track_pcm_data[i], -0.95, 0.95);
+    fmt.printf("--- 'LMB Kill Explosion' sound PCM data generated. ---\n")
+
+    lmb_kill_explosion_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(LMB_KILL_EXPLOSION_DURATION_FRAMES), rawptr(&lmb_kill_explosion_pcm_data[0]), nil)
+    init_lmb_kill_explosion_ab_result := ma.audio_buffer_init_copy(&lmb_kill_explosion_ab_config, &lmb_kill_explosion_audio_buffer)
+    if init_lmb_kill_explosion_ab_result == .SUCCESS {
+        fmt.printf("--- LMB Kill Explosion audio_buffer initialized. ---\n")
+        sound_flags_lmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+        p_data_source_lmb_kill := (^ma.data_source)(&lmb_kill_explosion_audio_buffer);
+        init_lmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_kill, sound_flags_lmb_kill, nil, &state.lmb_kill_sound);
+        if init_lmb_kill_sound_result == .SUCCESS {
+            ma.sound_set_volume(&state.lmb_kill_sound, LMB_KILL_EXPLOSION_AMPLITUDE);
+            fmt.printf("--- Miniaudio lmb_kill_sound initialized successfully (Volume: %.2f) ---\n", LMB_KILL_EXPLOSION_AMPLITUDE);
+        } else {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_kill_sound failed! Error: %v\n", init_lmb_kill_sound_result);
+            ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); 
+        }
+    } else {
+        fmt.eprintf("!!! CRITICAL: LMB Kill Explosion audio_buffer_init_copy failed! Error: %v\n", init_lmb_kill_explosion_ab_result)
     }
 
-    fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---\n")
-
-    // Initialize Miniaudio audio_buffer for the drum track
+    // Initialize Miniaudio audio_buffer for the drum track (This was the corrected drum generation block)
     drum_track_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(DRUM_TRACK_CHANNELS), u64(DRUM_TRACK_TOTAL_FRAMES), rawptr(&drum_track_pcm_data[0]), nil)
     init_drum_track_ab_result := ma.audio_buffer_init_copy(&drum_track_ab_config, &drum_track_audio_buffer)
     if init_drum_track_ab_result == .SUCCESS {
         fmt.printf("--- Drum Track audio_buffer initialized. ---\n")
-        // Initialize the persistent drum_track_sound
-        drum_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }; // Or other flags as needed
+        drum_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }; 
         p_drum_track_data_source := (^ma.data_source)(&drum_track_audio_buffer);
         init_drum_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_drum_track_data_source, drum_track_sound_flags, nil, &state.drum_track_sound);
         if init_drum_sound_result == .SUCCESS {
-            ma.sound_set_looping(&state.drum_track_sound, true); // Enable looping
-            ma.sound_set_volume(&state.drum_track_sound, DRUM_TRACK_AMPLITUDE); // Set volume
+            ma.sound_set_looping(&state.drum_track_sound, true); 
+            ma.sound_set_volume(&state.drum_track_sound, DRUM_TRACK_AMPLITUDE); 
             fmt.printf("--- Miniaudio drum_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", DRUM_TRACK_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for drum_track_sound failed! Error: %v\n", init_drum_sound_result);
-            // Cleanup its audio buffer if sound init fails, as it won't be used
             ma.audio_buffer_uninit(&drum_track_audio_buffer); 
         }
     } else {
         fmt.eprintf("!!! CRITICAL: Drum Track audio_buffer_init_copy failed! Error: %v\n", init_drum_track_ab_result)
     }
+
+    // (<<< NEW SYNTH TRACK INITIALIZATION START >>>)
+    fmt.printf("--- Generating Heavy Fast Synth Track PCM data (160 BPM)... ---\n");
+
+    SYNTH_TRACK_SECONDS_PER_BEAT_CALC : f32 = 60.0 / SYNTH_TRACK_BPM; // Renamed to avoid conflict if used elsewhere
+    SYNTH_TRACK_FRAMES_PER_BEAT_F32_CALC : f32 = SYNTH_TRACK_SECONDS_PER_BEAT_CALC * f32(SYNTH_TRACK_SAMPLE_RATE);
+    SYNTH_TRACK_FRAMES_PER_BEAT_CALC := int(math.round_f32(SYNTH_TRACK_FRAMES_PER_BEAT_F32_CALC));
+    SYNTH_TRACK_FRAMES_PER_BAR_CALC := SYNTH_TRACK_FRAMES_PER_BEAT_CALC * SYNTH_TRACK_BEATS_PER_BAR;
+    SYNTH_TRACK_TOTAL_FRAMES_CALC := SYNTH_TRACK_FRAMES_PER_BAR_CALC * SYNTH_TRACK_NUM_BARS;
+
+    synth_track_pcm_data = make([]f32, SYNTH_TRACK_TOTAL_FRAMES_CALC);
+    if synth_track_pcm_data == nil {
+        fmt.eprintf("!!! CRITICAL: Failed to allocate synth_track_pcm_data! Total Frames: %d\n", SYNTH_TRACK_TOTAL_FRAMES_CALC);
+        return; // Cannot proceed
+    } else {
+        fmt.printf("--- Synth track PCM data slice allocated. Total Frames: %d ---\n", SYNTH_TRACK_TOTAL_FRAMES_CALC);
+    }
+    for i in 0..<SYNTH_TRACK_TOTAL_FRAMES_CALC { synth_track_pcm_data[i] = 0.0; }
+
+    synth_attack_frames  := int(SYNTH_NOTE_ATTACK_TIME_S * f32(SYNTH_TRACK_SAMPLE_RATE));
+    synth_decay_frames   := int(SYNTH_NOTE_DECAY_TIME_S * f32(SYNTH_TRACK_SAMPLE_RATE));
+    synth_release_frames := int(SYNTH_NOTE_RELEASE_TIME_S * f32(SYNTH_TRACK_SAMPLE_RATE));
+
+    NOTE_DURATION_FRAMES_8TH_SYNTH := SYNTH_TRACK_FRAMES_PER_BEAT_CALC / 2; // Renamed
+
+    min_adsr_frames_synth := synth_attack_frames + synth_decay_frames + synth_release_frames; // Renamed
+    if NOTE_DURATION_FRAMES_8TH_SYNTH < min_adsr_frames_synth {
+        fmt.eprintf("!!! WARNING: Synth note duration (%d frames) is shorter than ADSR phases combined (%d frames). Adjust ADSR times.\n", NOTE_DURATION_FRAMES_8TH_SYNTH, min_adsr_frames_synth);
+    }
+    synth_sustain_duration_frames := NOTE_DURATION_FRAMES_8TH_SYNTH - synth_attack_frames - synth_decay_frames - synth_release_frames;
+    if synth_sustain_duration_frames < 0 { synth_sustain_duration_frames = 0; } 
+
+    note_frequencies_synth := [SYNTH_TRACK_NUM_BARS][SYNTH_TRACK_BEATS_PER_BAR * 2]f32 {}; // Renamed
+    for i in 0..<(SYNTH_TRACK_BEATS_PER_BAR * 2) { note_frequencies_synth[0][i] = 110.0; } // A2
+    for i in 0..<(SYNTH_TRACK_BEATS_PER_BAR * 2) { note_frequencies_synth[1][i] = 130.81; } // C3
+
+    current_phase_synth_gen: f64 = 0.0; // Renamed
+
+    for bar_s_idx in 0..<SYNTH_TRACK_NUM_BARS { // Renamed
+        for eighth_note_s_idx in 0..<(SYNTH_TRACK_BEATS_PER_BAR * 2) { // Renamed
+            note_start_frame_in_track_s := (bar_s_idx * SYNTH_TRACK_FRAMES_PER_BAR_CALC) + (eighth_note_s_idx * NOTE_DURATION_FRAMES_8TH_SYNTH); // Renamed
+            current_note_freq_s := f64(note_frequencies_synth[bar_s_idx][eighth_note_s_idx]); // Renamed
+
+            for frame_in_note_s in 0..<NOTE_DURATION_FRAMES_8TH_SYNTH { // Renamed
+                global_frame_idx_s := note_start_frame_in_track_s + frame_in_note_s; // Renamed
+                if global_frame_idx_s >= SYNTH_TRACK_TOTAL_FRAMES_CALC { break; }
+
+                envelope_amp_s: f32 = 0.0; // Renamed
+                if frame_in_note_s < synth_attack_frames {
+                    envelope_amp_s = f32(frame_in_note_s) / f32(math.max(1,synth_attack_frames)); // max(1,..) to avoid div by zero if attack_frames is 0
+                } else if frame_in_note_s < synth_attack_frames + synth_decay_frames {
+                    progress_decay_s := f32(frame_in_note_s - synth_attack_frames) / f32(math.max(1,synth_decay_frames));
+                    // Cast untyped float consts to f64 for m.lerp, and progress_decay_s to f64. Cast result to f32.
+                    envelope_amp_s = f32(m.lerp(f32(1.0), f32(SYNTH_NOTE_SUSTAIN_LEVEL), f32(progress_decay_s)));
+                } else if frame_in_note_s < synth_attack_frames + synth_decay_frames + synth_sustain_duration_frames {
+                    envelope_amp_s = SYNTH_NOTE_SUSTAIN_LEVEL; // This is f32, ensure SYNTH_NOTE_SUSTAIN_LEVEL is assignable or cast
+                                                              // SYNTH_NOTE_SUSTAIN_LEVEL :: 0.6 (untyped float, can assign to f32) - this line is OK
+                } else { 
+                    if synth_release_frames > 0 {
+                        frames_into_release_s := frame_in_note_s - (synth_attack_frames + synth_decay_frames + synth_sustain_duration_frames);
+                        progress_release_s := f32(frames_into_release_s) / f32(synth_release_frames);
+                        // Cast untyped float consts to f64 for m.lerp, and progress_release_s to f64. Cast result to f32.
+                        envelope_amp_s = f32(m.lerp(f32(SYNTH_NOTE_SUSTAIN_LEVEL), f32(0.0), f32(progress_release_s)));
+                    } else { envelope_amp_s = 0.0; }
+                }
+                envelope_amp_s = math.clamp(envelope_amp_s, 0.0, 1.0);
+
+                saw_phase_s := current_phase_synth_gen / (2.0 * f64(math.PI)); // Renamed
+                sample_val_f64_s := 2.0 * (saw_phase_s - math.floor(0.5 + saw_phase_s)); // Renamed
+
+                synth_track_pcm_data[global_frame_idx_s] += f32(sample_val_f64_s * f64(envelope_amp_s) * f64(SYNTH_TRACK_AMPLITUDE));
+                
+                current_phase_synth_gen += (2.0 * f64(math.PI) * current_note_freq_s) / f64(SYNTH_TRACK_SAMPLE_RATE);
+                if current_phase_synth_gen >= (2.0 * f64(math.PI)) {
+                    current_phase_synth_gen -= (2.0 * f64(math.PI));
+                }
+            }
+            current_phase_synth_gen = 0.0; // Reset phase for next note
+        }
+    }
+    for i_clamp in 0..<SYNTH_TRACK_TOTAL_FRAMES_CALC {
+        synth_track_pcm_data[i_clamp] = math.clamp(synth_track_pcm_data[i_clamp], -0.95, 0.95);
+    }
+    fmt.printf("--- Heavy Fast Synth Track PCM data generated. ---\n");
+
+    synth_track_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(SYNTH_TRACK_CHANNELS), u64(SYNTH_TRACK_TOTAL_FRAMES_CALC), rawptr(&synth_track_pcm_data[0]), nil);
+    init_synth_track_ab_result := ma.audio_buffer_init_copy(&synth_track_ab_config, &synth_track_audio_buffer);
+    if init_synth_track_ab_result == .SUCCESS {
+        fmt.printf("--- Synth Track audio_buffer initialized. ---\n");
+        synth_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
+        p_synth_track_data_source := (^ma.data_source)(&synth_track_audio_buffer);
+        init_synth_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_synth_track_data_source, synth_track_sound_flags, nil, &state.synth_track_sound);
+        if init_synth_sound_result == .SUCCESS {
+            ma.sound_set_looping(&state.synth_track_sound, true);
+            ma.sound_set_volume(&state.synth_track_sound, 1.0); // PCM data already has SYNTH_TRACK_AMPLITUDE baked in, so master volume is 1.0 unless further adjustment needed
+            fmt.printf("--- Miniaudio synth_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", 1.0);
+        } else {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for synth_track_sound failed! Error: %v\n", init_synth_sound_result);
+            ma.audio_buffer_uninit(&synth_track_audio_buffer);
+        }
+    } else {
+        fmt.eprintf("!!! CRITICAL: Synth Track audio_buffer_init_copy failed! Error: %v\n", init_synth_track_ab_result);
+    }
+    // (<<< NEW SYNTH TRACK INITIALIZATION END >>>)
+
 
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
@@ -1029,14 +963,11 @@ init :: proc "c" () {
             attrs={ 
                 ATTR_enemy_quad_pos_in={buffer_index=0,offset=0,format=.FLOAT2}, 
                 ATTR_enemy_quad_uv_in={buffer_index=0,offset=8,format=.FLOAT2},
-                ATTR_enemy_instance_pos_vs_in={buffer_index=1,offset=0,format=.FLOAT2}, // <<< CORRECTED HERE
+                ATTR_enemy_instance_pos_vs_in={buffer_index=1,offset=0,format=.FLOAT2}, 
                 ATTR_enemy_instance_main_rotation_vs_in={buffer_index=1,offset=8,format=.FLOAT},
                 ATTR_enemy_instance_visual_scale_vs_in={buffer_index=1,offset=12,format=.FLOAT},
                 ATTR_enemy_instance_color_vs_in={buffer_index=1,offset=16,format=.FLOAT4}, 
                 ATTR_enemy_instance_effect_params_vs_in={buffer_index=1,offset=32,format=.FLOAT4},
-                // New attribute for enemy type:
-                // Verifying the attribute name as per subtask.
-                // The shader GLSL uses layout(location=7) for instance_enemy_type_vs_in.
                 ATTR_enemy_instance_enemy_type_vs_in={buffer_index=1,offset=48,format=.FLOAT},
             }
         },
@@ -1065,15 +996,14 @@ init :: proc "c" () {
     state.lmb_down=false; state.previous_lmb_down=false; state.lmb_cooldown_timer=0.0;
     state.mouse_screen_pos = {0,0};
 
-    state.current_rmb_ammo_charges = 0; // Start with 0 charges, or MAX_RMB_AMMO_CHARGES for full
-    state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL/10; // Timer for the first charge
+    state.current_rmb_ammo_charges = 0; 
+    state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL/10; 
 
-    // Initialize new enemy spawn timers
     state.grunt_spawn_timer = 1.0; 
     state.slowboy_spawn_timer = 5.0; 
 
-    // state.enemy_spawn_timer = rand.float32_range(2.0, 3.0) // REMOVED
     state.first_grunt_killed = false;
+    state.first_slowboy_killed = false; // <<< NEW
     fmt.printf("--- Init Complete ---\n")
 }
 
@@ -1100,69 +1030,41 @@ geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_
 // --- Particle System ---
 emit_particle :: proc(part: Particle) {
 	context = runtime.default_context()
-
-    // Target the particle being actually stored in the state.particles array
     p_to_init_sound := &state.particles[state.next_particle_index]
-    
-    // Initialize 'has_active_sound' to false by default for the particle being placed.
-    // The 'part' argument to emit_particle is copied, so we modify the one in the array.
-    // This also means the 'part' argument should have flags like is_ammo_indicator set by the caller.
-    p_to_init_sound^ = part // Copy initial data from 'part' argument
-    p_to_init_sound.has_active_sound = false // Default to no sound
+    p_to_init_sound^ = part 
+    p_to_init_sound.has_active_sound = false 
 
     if p_to_init_sound.is_ammo_indicator || p_to_init_sound.is_swirling_charge {
         p_to_init_sound.has_active_sound = true
-        
-        sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } // Default flags
-
-        // Initialize Hum Sound
-        hum_init_res := ma.sound_init_from_data_source(
-            &state.audio_engine, 
-            (^ma.data_source)(&rmb_hum_audio_buffer), 
-            sound_flags, 
-            nil, 
-            &p_to_init_sound.sound_hum,
-        )
+        sound_flags_particle: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } // Renamed
+        hum_init_res := ma.sound_init_from_data_source(&state.audio_engine, (^ma.data_source)(&rmb_hum_audio_buffer), sound_flags_particle, nil, &p_to_init_sound.sound_hum)
         if hum_init_res == .SUCCESS {
             ma.sound_set_looping(&p_to_init_sound.sound_hum, true)
-            ma.sound_set_volume(&p_to_init_sound.sound_hum, RMB_HUM_AMPLITUDE) // Initial volume
+            ma.sound_set_volume(&p_to_init_sound.sound_hum, RMB_HUM_AMPLITUDE) 
             ma.sound_start(&p_to_init_sound.sound_hum)
         } else {
             fmt.eprintf("!!! ERROR: Failed to init hum sound for particle. Code: %v\n", hum_init_res)
-            p_to_init_sound.has_active_sound = false // Failed, so no active sound
+            p_to_init_sound.has_active_sound = false 
         }
 
-        // Initialize Whoosh Sound (only if hum sound succeeded)
         if p_to_init_sound.has_active_sound { 
-            whoosh_init_res := ma.sound_init_from_data_source(
-                &state.audio_engine,
-                (^ma.data_source)(&rmb_whoosh_audio_buffer),
-                sound_flags,
-                nil,
-                &p_to_init_sound.sound_whoosh,
-            )
+            whoosh_init_res := ma.sound_init_from_data_source(&state.audio_engine, (^ma.data_source)(&rmb_whoosh_audio_buffer), sound_flags_particle, nil, &p_to_init_sound.sound_whoosh)
             if whoosh_init_res == .SUCCESS {
                 ma.sound_set_looping(&p_to_init_sound.sound_whoosh, true)
-                ma.sound_set_volume(&p_to_init_sound.sound_whoosh, 0.0) // Whoosh starts silent
+                ma.sound_set_volume(&p_to_init_sound.sound_whoosh, 0.0) 
                 ma.sound_start(&p_to_init_sound.sound_whoosh)
             } else {
                 fmt.eprintf("!!! ERROR: Failed to init whoosh sound for particle. Code: %v\n", whoosh_init_res)
-                // If whoosh fails, uninit hum as well to keep consistent state
                 ma.sound_uninit(&p_to_init_sound.sound_hum) 
-                p_to_init_sound.has_active_sound = false // Failed, so no active sound
+                p_to_init_sound.has_active_sound = false 
             }
         }
-        
-        if p_to_init_sound.has_active_sound {
-             // fmt.printf("--- Particle sound initialized (Hum/Whoosh) ---\n") // Optional: for debugging
-        }
     }
-    
-    p_to_init_sound.active = true // Make sure particle is active after all setup
+    p_to_init_sound.active = true 
 	state.next_particle_index = (state.next_particle_index + 1) % MAX_PARTICLES
 }
 
-spawn_swirling_charge :: proc() { // RMB Ability
+spawn_swirling_charge :: proc() { 
 	context = runtime.default_context()
     if state.player_hp <= 0 { return; } 
     charge_spawn_center := state.player_pos 
@@ -1208,51 +1110,28 @@ update_and_instance_particles :: proc(dt: f32) -> int {
         p := &state.particles[i]
 
         if p.is_ammo_indicator {
-            // --- Update Orbiting Ammo Indicator Particles ---
-            // p.rotation stores its current orbit angle around the player.
-            // p.angular_vel is its self-spin.
-            
-            p.rotation += RMB_AMMO_INDICATOR_ORBIT_SPEED * dt; // Update orbit angle
+            p.rotation += RMB_AMMO_INDICATOR_ORBIT_SPEED * dt; 
             if p.rotation > m.TAU { p.rotation -= m.TAU; }
             else if p.rotation < 0 { p.rotation += m.TAU; }
-
             orbit_direction := m.angle_to_vec2(p.rotation);
             p.pos = state.player_pos + orbit_direction * RMB_AMMO_INDICATOR_ORBIT_RADIUS;
-            
-            // Update self-spin (visual rotation of the particle quad itself)
-            p.angular_vel = p.angular_vel; // Keep its assigned self-spin or update if needed
-            // The actual rotation for instancing will be p.rotation + its self-spin component if desired
-            // For simplicity, let's use a temporary variable for the visual rotation if self-spin is complex.
-            // Let's assume p.angular_vel is the self-spin speed, and we accumulate it.
-            // We need another field if p.rotation is *only* for orbit. Let's reuse angular_vel for spin and store current self-rotation in charge_center_pos.y for now
-            
-            p.charge_center_pos.y += p.angular_vel * dt; // Use charge_center_pos.y to accumulate self-rotation
+            p.charge_center_pos.y += p.angular_vel * dt; 
             if p.charge_center_pos.y > m.TAU {p.charge_center_pos.y -= m.TAU;}
             if p.charge_center_pos.y < 0 {p.charge_center_pos.y += m.TAU;}
-
-
-            // These particles don't expire by time, color/alpha is constant
             p.color = RMB_AMMO_INDICATOR_COLOR;
             p.size = RMB_AMMO_INDICATOR_BASE_SIZE;
-            // No life_remaining countdown for these.
-            // --- End Update Orbiting Ammo Indicator Particles ---
         } else {
-            // --- Regular Particle Update Logic ---
             p.pos += p.vel * dt;
-
-            // --- Off-Screen Particle Check & Cleanup ---
-            // (Ensure 'p' is a pointer to the current particle, e.g., p := &state.particles[i])
-            // Screen boundaries calculation
-            screen_aspect_ratio: f32 = sapp.widthf() / sapp.heightf()
-            world_half_width: f32 = ORTHO_HEIGHT * screen_aspect_ratio
-            world_half_height: f32 = ORTHO_HEIGHT // ORTHO_HEIGHT is likely f32 or compatible (e.g. untyped float const)
-            off_screen_margin: f32 = 0.1 // Margin for particles to be considered off-screen
+            screen_aspect_ratio_part: f32 = sapp.widthf() / sapp.heightf() // Renamed
+            world_half_width_part: f32 = ORTHO_HEIGHT * screen_aspect_ratio_part // Renamed
+            world_half_height_part: f32 = ORTHO_HEIGHT // Renamed
+            off_screen_margin_part: f32 = 0.1 // Renamed
 
             is_off_screen := false
-            if p.pos.x < -world_half_width - off_screen_margin ||
-               p.pos.x >  world_half_width + off_screen_margin ||
-               p.pos.y < -world_half_height - off_screen_margin ||
-               p.pos.y >  world_half_height + off_screen_margin {
+            if p.pos.x < -world_half_width_part - off_screen_margin_part ||
+               p.pos.x >  world_half_width_part + off_screen_margin_part ||
+               p.pos.y < -world_half_height_part - off_screen_margin_part ||
+               p.pos.y >  world_half_height_part + off_screen_margin_part {
                 is_off_screen = true
             }
 
@@ -1261,59 +1140,40 @@ update_and_instance_particles :: proc(dt: f32) -> int {
                     ma.sound_uninit(&p.sound_hum)
                     ma.sound_uninit(&p.sound_whoosh)
                     p.has_active_sound = false
-                    // Optional: fmt.printf("--- Particle sound uninitialized (off-screen) for particle %d ---\n", i)
                 }
                 p.active = false
-                // After deactivating, we should skip any further processing for this particle in this frame.
-                // The 'continue' ensures it's not included in sound updates or instancing.
                 continue 
             }
-            // --- End Off-Screen Particle Check & Cleanup ---
 
-            // Add this block for sound updates:
             if p.has_active_sound {
-                current_speed := m.len_vec2(p.vel) // Calculate speed from velocity vector
-                
-                // Normalize speed to a 0.0 - 1.0 factor
-                // Ensure MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT is not zero to avoid division by zero
-                speed_factor: f32
-                if MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT > 0.001 { // Check against a small epsilon
-                    speed_factor = math.clamp(current_speed / MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT, 0.0, 1.0)
-                } else {
-                    speed_factor = 0.0 // Default if max speed is zero or too small
-                }
-
-                hum_target_volume := (1.0 - speed_factor) * RMB_HUM_AMPLITUDE
-                whoosh_target_volume := speed_factor * RMB_WHOOSH_AMPLITUDE
-
-                ma.sound_set_volume(&p.sound_hum, hum_target_volume)
-                ma.sound_set_volume(&p.sound_whoosh, whoosh_target_volume)
-                
-                // Optional: Print volumes for debugging
-                // if p.is_ammo_indicator { // Example: only for ammo indicators
-                //    fmt.printf("Particle %d: speed=%.2f, factor=%.2f, hum_vol=%.2f, whoosh_vol=%.2f\n", i, current_speed, speed_factor, hum_target_volume, whoosh_target_volume)
-                // }
+                current_speed_part := m.len_vec2(p.vel) // Renamed
+                speed_factor_part: f32 // Renamed
+                if MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT > 0.001 { 
+                    speed_factor_part = math.clamp(current_speed_part / MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT, 0.0, 1.0)
+                } else { speed_factor_part = 0.0 }
+                hum_target_volume_part := (1.0 - speed_factor_part) * RMB_HUM_AMPLITUDE // Renamed
+                whoosh_target_volume_part := speed_factor_part * RMB_WHOOSH_AMPLITUDE // Renamed
+                ma.sound_set_volume(&p.sound_hum, hum_target_volume_part)
+                ma.sound_set_volume(&p.sound_whoosh, whoosh_target_volume_part)
             }
-            // Regular particle self-rotation:
             p.rotation += p.angular_vel * dt; 
             if p.rotation > m.TAU { p.rotation -= m.TAU; } else if p.rotation < 0 { p.rotation += m.TAU; }
-            
             p.life_remaining -= dt;
 
             if p.is_swirling_charge && p.life_remaining <= 0.0 {
                 p.is_swirling_charge = false;
-                new_life := EXPLOSION_LIFETIME_BASE + rand.float32() * EXPLOSION_LIFETIME_RAND;
-                p.life_remaining = new_life;
-                p.life_max = new_life;    
-                explosion_center := p.charge_center_pos + p.cloud_travel_vel * p.swirl_duration;
-                relative_pos := p.pos - explosion_center;
-                outward_dir : m.vec2 = {rand.float32() * 2.0 - 1.0, rand.float32() * 2.0 - 1.0};
-                len_sq := m.len_sq_vec2(relative_pos);
-                if len_sq > 0.0001 { outward_dir = m.norm_vec2(relative_pos);
-                } else if m.len_sq_vec2(outward_dir) > 0.0001 { outward_dir = m.norm_vec2(outward_dir);
-                } else { outward_dir = {0.0, 1.0}; }
-                explosion_speed := EXPLOSION_SPEED_BASE + rand.float32() * EXPLOSION_SPEED_RAND;
-                p.vel = outward_dir * explosion_speed;
+                new_life_part := EXPLOSION_LIFETIME_BASE + rand.float32() * EXPLOSION_LIFETIME_RAND; // Renamed
+                p.life_remaining = new_life_part;
+                p.life_max = new_life_part;    
+                explosion_center_part := p.charge_center_pos + p.cloud_travel_vel * p.swirl_duration; // Renamed
+                relative_pos_part := p.pos - explosion_center_part; // Renamed
+                outward_dir_part : m.vec2 = {rand.float32() * 2.0 - 1.0, rand.float32() * 2.0 - 1.0}; // Renamed
+                len_sq_part := m.len_sq_vec2(relative_pos_part); // Renamed
+                if len_sq_part > 0.0001 { outward_dir_part = m.norm_vec2(relative_pos_part);
+                } else if m.len_sq_vec2(outward_dir_part) > 0.0001 { outward_dir_part = m.norm_vec2(outward_dir_part);
+                } else { outward_dir_part = {0.0, 1.0}; }
+                explosion_speed_part := EXPLOSION_SPEED_BASE + rand.float32() * EXPLOSION_SPEED_RAND; // Renamed
+                p.vel = outward_dir_part * explosion_speed_part;
                 p.angular_vel = EXPLOSION_PARTICLE_SPIN;
             }
 
@@ -1322,36 +1182,29 @@ update_and_instance_particles :: proc(dt: f32) -> int {
                     ma.sound_uninit(&p.sound_hum)
                     ma.sound_uninit(&p.sound_whoosh)
                     p.has_active_sound = false
-                    // Optional: fmt.printf("--- Particle sound uninitialized (life expired) ---\n")
                 }
                 p.active = false; 
                 continue; 
             }
 
-            life_ratio: f32 = 0.0;
-            if p.life_max > 0.0 { life_ratio = math.max(f32(0.0), p.life_remaining / p.life_max); }
+            life_ratio_part: f32 = 0.0; // Renamed
+            if p.life_max > 0.0 { life_ratio_part = math.max(f32(0.0), p.life_remaining / p.life_max); }
             
             if p.is_swirling_charge { 
                 p.size = p.start_size; 
                 p.color.a = 1.0;      
-            } else { // Explosion or burst particles
-                p.size = p.start_size * life_ratio * life_ratio; 
-                p.color.a = life_ratio * life_ratio; 
+            } else { 
+                p.size = p.start_size * life_ratio_part * life_ratio_part; 
+                p.color.a = life_ratio_part * life_ratio_part; 
             }
-            // --- End Regular Particle Update Logic ---
         }
         
-        // Instance data common to all active particles
         if live_particle_count < MAX_PARTICLES {
             inst := &state.particle_instance_data[live_particle_count];
             inst.instance_pos=p.pos; 
             inst.instance_size=p.size; 
-            // For ammo indicators, use their accumulated self-spin. For others, use their regular rotation.
-            if p.is_ammo_indicator {
-                inst.instance_rotation = p.charge_center_pos.y; 
-            } else {
-                inst.instance_rotation = p.rotation;
-            }
+            if p.is_ammo_indicator { inst.instance_rotation = p.charge_center_pos.y;  } 
+            else { inst.instance_rotation = p.rotation; }
             inst.instance_color=p.color;
             live_particle_count += 1;
         }
@@ -1362,20 +1215,20 @@ update_and_instance_particles :: proc(dt: f32) -> int {
 spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
 	context = runtime.default_context()
 	for _ in 0..<LMB_ENEMY_DEATH_PARTICLE_COUNT {
-		angle := rand.float32() * m.TAU
-		dir := m.angle_to_vec2(angle)
-		speed := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND
-		life := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
-		size := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
-		angular_vel := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
-		particle_color := base_color;
-		particle_color.r = math.min(base_color.r * 1.2 + 0.2, 1.0);
-		particle_color.g = math.min(base_color.g * 1.2 + 0.2, 1.0);
-		particle_color.b = math.min(base_color.b * 1.2 + 0.2, 1.0);
-		particle_color.a = 0.85; 
+		angle_lmb_d := rand.float32() * m.TAU // Renamed
+		dir_lmb_d := m.angle_to_vec2(angle_lmb_d) // Renamed
+		speed_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
+		life_lmb_d := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
+		size_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
+		angular_vel_lmb_d := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
+		particle_color_lmb_d := base_color; // Renamed
+		particle_color_lmb_d.r = math.min(base_color.r * 1.2 + 0.2, 1.0);
+		particle_color_lmb_d.g = math.min(base_color.g * 1.2 + 0.2, 1.0);
+		particle_color_lmb_d.b = math.min(base_color.b * 1.2 + 0.2, 1.0);
+		particle_color_lmb_d.a = 0.85; 
 		emit_particle(Particle{
-			pos=pos, vel=dir*speed, cloud_travel_vel={0,0}, color=particle_color, size=size, start_size=size,
-            life_remaining=life, life_max=life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel,
+			pos=pos, vel=dir_lmb_d*speed_lmb_d, cloud_travel_vel={0,0}, color=particle_color_lmb_d, size=size_lmb_d, start_size=size_lmb_d,
+            life_remaining=life_lmb_d, life_max=life_lmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_lmb_d,
             charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
 		})
 	}
@@ -1383,45 +1236,19 @@ spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
 
 spawn_visual_ammo_charge_particles :: proc(charge_slot_index: int) {
     context = runtime.default_context()
-    if charge_slot_index < 0 || charge_slot_index >= MAX_RMB_AMMO_CHARGES {
-        return;
-    }
-
-    // Calculate a base starting angle for this new charge's group of particles
-    // This helps to spread them out if multiple charges are gained over time.
-    // A more sophisticated approach might assign fixed angular slots per charge.
-    base_orbit_angle_offset := (f32(charge_slot_index) / f32(MAX_RMB_AMMO_CHARGES)) * m.TAU;
-
-
+    if charge_slot_index < 0 || charge_slot_index >= MAX_RMB_AMMO_CHARGES { return; }
+    base_orbit_angle_offset_va := (f32(charge_slot_index) / f32(MAX_RMB_AMMO_CHARGES)) * m.TAU; // Renamed
     for i in 0..<RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE {
-        // Distribute particles within this charge's visual group
-        particle_angle_within_group := (f32(i) / f32(RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE)) * m.TAU;
-        
-        // The 'rotation' field will store the particle's current orbit angle relative to player
-        // The 'angular_vel' will be its self-spin.
-        // The 'vel' will be (0,0) as orbit is handled by recalculating 'pos'.
-        
-        // Store the base orbit angle (relative to player) in p.rotation.
-        // The actual world position will be calculated in update_and_instance_particles.
-        current_orbit_angle := base_orbit_angle_offset + particle_angle_within_group + (state.rmb_ammo_regen_timer * RMB_AMMO_INDICATOR_ORBIT_SPEED); // Add current time factor for dynamic placement
-
+        particle_angle_within_group_va := (f32(i) / f32(RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE)) * m.TAU; // Renamed
+        current_orbit_angle_va := base_orbit_angle_offset_va + particle_angle_within_group_va + (state.rmb_ammo_regen_timer * RMB_AMMO_INDICATOR_ORBIT_SPEED); // Renamed
         emit_particle(Particle{
-            pos              = state.player_pos, // Will be updated to orbit
-            vel              = {0,0}, // Orbit is handled by directly setting pos
-            cloud_travel_vel = {0,0},
-            color            = RMB_AMMO_INDICATOR_COLOR,
-            size             = RMB_AMMO_INDICATOR_BASE_SIZE,
-            start_size       = RMB_AMMO_INDICATOR_BASE_SIZE,
-            life_remaining   = 1.0, // Effectively infinite; not used for despawn
-            life_max         = 1.0,
-            swirl_duration   = 0,
-            rotation         = current_orbit_angle, // Stores its current angle in orbit around player
-            angular_vel      = rand.float32_range(-1,1) * RMB_AMMO_INDICATOR_SELF_SPIN_SPEED, // Self-spin
-            charge_center_pos= m.vec2{f32(charge_slot_index), f32(i)}, // Store charge and particle index in this charge
-            is_burst_particle= false,
-            is_swirling_charge= false,
-            is_ammo_indicator= true, // Mark as an ammo indicator
-            active           = false, // emit_particle sets true
+            pos = state.player_pos, vel = {0,0}, cloud_travel_vel = {0,0}, color = RMB_AMMO_INDICATOR_COLOR,
+            size = RMB_AMMO_INDICATOR_BASE_SIZE, start_size = RMB_AMMO_INDICATOR_BASE_SIZE,
+            life_remaining = 1.0, life_max = 1.0, swirl_duration = 0,
+            rotation = current_orbit_angle_va, 
+            angular_vel = rand.float32_range(-1,1) * RMB_AMMO_INDICATOR_SELF_SPIN_SPEED, 
+            charge_center_pos= m.vec2{f32(charge_slot_index), f32(i)}, 
+            is_burst_particle= false, is_swirling_charge= false, is_ammo_indicator= true, active = false,
         });
     }
      fmt.printf("Spawned visual ammo for charge slot %d\n", charge_slot_index);
@@ -1430,20 +1257,15 @@ spawn_visual_ammo_charge_particles :: proc(charge_slot_index: int) {
 remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
     context = runtime.default_context()
     particles_removed_count := 0
-    // Iterate through all particles and remove those matching the charge_slot_index
-    // We stored charge_slot_index in particle.charge_center_pos.x
     for i in 0..<MAX_PARTICLES {
-        p := &state.particles[i];
-        if p.active && p.is_ammo_indicator && int(p.charge_center_pos.x) == charge_slot_index_to_remove {
-            if p.has_active_sound {
-                ma.sound_uninit(&p.sound_hum)
-                ma.sound_uninit(&p.sound_whoosh)
-                p.has_active_sound = false
-                // Optional: fmt.printf("--- Ammo indicator particle sound uninitialized (removed) ---\n")
+        p_va_rem := &state.particles[i]; // Renamed
+        if p_va_rem.active && p_va_rem.is_ammo_indicator && int(p_va_rem.charge_center_pos.x) == charge_slot_index_to_remove {
+            if p_va_rem.has_active_sound {
+                ma.sound_uninit(&p_va_rem.sound_hum)
+                ma.sound_uninit(&p_va_rem.sound_whoosh)
+                p_va_rem.has_active_sound = false
             }
-            p.active = false; 
-            // Optional: Add a quick shrink/fade animation here before deactivation
-            // For now, they just disappear.
+            p_va_rem.active = false; 
             particles_removed_count += 1;
         }
     }
@@ -1454,22 +1276,22 @@ remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
 
 spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 	context = runtime.default_context()
-	base_death_color := RMB_PARTICLE_COLOR; 
+	base_death_color_rmb := RMB_PARTICLE_COLOR; // Renamed
 	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
-		angle := rand.float32() * m.TAU
-		dir := m.angle_to_vec2(angle)
-		speed := RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND
-		life := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND
-		size := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND
-		angular_vel := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX
-		particle_color := base_death_color;
-		particle_color.r = math.clamp(base_death_color.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
-		particle_color.g = math.clamp(base_death_color.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
-		particle_color.b = math.clamp(base_death_color.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
-		particle_color.a = rand.float32_range(0.6, 0.9); 
+		angle_rmb_d := rand.float32() * m.TAU // Renamed
+		dir_rmb_d := m.angle_to_vec2(angle_rmb_d) // Renamed
+		speed_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
+		life_rmb_d := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
+		size_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
+		angular_vel_rmb_d := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
+		particle_color_rmb_d := base_death_color_rmb; // Renamed
+		particle_color_rmb_d.r = math.clamp(base_death_color_rmb.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
+		particle_color_rmb_d.g = math.clamp(base_death_color_rmb.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
+		particle_color_rmb_d.b = math.clamp(base_death_color_rmb.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
+		particle_color_rmb_d.a = rand.float32_range(0.6, 0.9); 
 		emit_particle(Particle{
-			pos=pos, vel=dir*speed, cloud_travel_vel={0,0}, color=particle_color, size=size, start_size=size,
-            life_remaining=life, life_max=life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel,
+			pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
+            life_remaining=life_rmb_d, life_max=life_rmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_rmb_d,
             charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
 		})
 	}
@@ -1478,93 +1300,79 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
-        particle := &state.particles[i]
-        // Filter out non-active, ammo indicators, or dedicated "burst" (like enemy death) particles.
-        // Allow both swirling_charge particles and their subsequent explosion phase particles.
-        if !particle.active || particle.is_ammo_indicator || particle.is_burst_particle {
+        particle_rmb_coll := &state.particles[i] // Renamed
+        if !particle_rmb_coll.active || particle_rmb_coll.is_ammo_indicator || particle_rmb_coll.is_burst_particle {
             continue;
         }
-        // Further ensure it's a particle from the RMB ability (either swirling or exploded from swirl)
-        // Swirling particles have is_swirling_charge = true.
-        // Explosion particles had is_swirling_charge = true, then it became false and they got new life.
-        // We need a robust way to identify them.
-        // For now, the above filter might be okay if PARTICLE_DAMAGE_VALUE is meant for all RMB weapon particles.
-        // The key is that `is_burst_particle` is false for the swirl cloud and its explosion phase.
-        // `is_burst_particle` is true for particles spawned by `spawn_LMB_enemy_death_particles` and `spawn_RMB_enemy_death_particles`.
-        particle_radius := particle.size * 0.5 
-        if particle_radius <= 0.001 { continue }
+        particle_radius_rmb_coll := particle_rmb_coll.size * 0.5 // Renamed
+        if particle_radius_rmb_coll <= 0.001 { continue }
 
         for j in 0..<MAX_ENEMIES {
-            enemy := &state.enemies[j]
-            if !enemy.active { continue } // Check if enemy is active
-            if enemy.is_dying { continue; } // Skip if already dying
+            enemy_rmb_coll := &state.enemies[j] // Renamed
+            if !enemy_rmb_coll.active || enemy_rmb_coll.is_dying { continue } 
             
-            enemy_radius := enemy.current_size * 0.5
-            if enemy_radius <= 0.001 { continue }
+            enemy_radius_rmb_coll := enemy_rmb_coll.current_size * 0.5 // Renamed
+            if enemy_radius_rmb_coll <= 0.001 { continue }
 
-            dist_sq := m.len_sq_vec2(particle.pos - enemy.pos)
-            radii_sum := particle_radius + enemy_radius
-            radii_sum_sq := radii_sum * radii_sum
+            dist_sq_rmb_coll := m.len_sq_vec2(particle_rmb_coll.pos - enemy_rmb_coll.pos) // Renamed
+            radii_sum_rmb_coll := particle_radius_rmb_coll + enemy_radius_rmb_coll // Renamed
+            radii_sum_sq_rmb_coll := radii_sum_rmb_coll * radii_sum_rmb_coll // Renamed
 
-            if dist_sq < radii_sum_sq {
-                // RMB particles might do more than 1 damage, or enemy HP might be > 1
-                // So, damage first, then check HP.
-                enemy.hp -= PARTICLE_DAMAGE_VALUE // Assuming PARTICLE_DAMAGE_VALUE is defined (it is, as 1)
-                fmt.printf("RMB Hit: Enemy %p, HP before sound check: %d\n", enemy, enemy.hp);
+            if dist_sq_rmb_coll < radii_sum_sq_rmb_coll {
+                enemy_rmb_coll.hp -= PARTICLE_DAMAGE_VALUE 
+                fmt.printf("RMB Hit: Enemy %p, HP before sound check: %d\n", enemy_rmb_coll, enemy_rmb_coll.hp);
                 
-                // Play sound based on whether enemy died or was just hit
-                if enemy.hp <= 0 {
-                    // Check if it wasn't already dying to play death sound only once
-                    if !enemy.is_dying {
-                        fmt.printf("RMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy, enemy.is_dying);
-                        //play_one_shot_sound(&state.audio_engine, &enemy_death_sound_audio_buffer, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE) // Old call
+                if enemy_rmb_coll.hp <= 0 {
+                    if !enemy_rmb_coll.is_dying {
+                        fmt.printf("RMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy_rmb_coll, enemy_rmb_coll.is_dying);
                         ma.sound_seek_to_pcm_frame(&state.rmb_kill_sound, 0);
                         ma.sound_start(&state.rmb_kill_sound);
                     }
                 } else {
-                    fmt.printf("RMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy, enemy.hp);
-                    //play_one_shot_sound(&state.audio_engine, &enemy_hit_sound_audio_buffer, ENEMY_HIT_SOUND_AMPLITUDE) // Old call
+                    fmt.printf("RMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy_rmb_coll, enemy_rmb_coll.hp);
                     ma.sound_seek_to_pcm_frame(&state.rmb_hit_sound, 0);
                     ma.sound_start(&state.rmb_hit_sound);
                 }
 
-                if particle.has_active_sound {
-                    ma.sound_uninit(&particle.sound_hum)
-                    ma.sound_uninit(&particle.sound_whoosh)
-                    particle.has_active_sound = false
-                    // Optional: fmt.printf("--- RMB particle sound uninitialized (collision) ---\n")
+                if particle_rmb_coll.has_active_sound {
+                    ma.sound_uninit(&particle_rmb_coll.sound_hum)
+                    ma.sound_uninit(&particle_rmb_coll.sound_whoosh)
+                    particle_rmb_coll.has_active_sound = false
                 }
-                particle.active = false // Particle is consumed
+                particle_rmb_coll.active = false 
 
-                if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
-                    enemy.is_dying = true;
-                    if enemy.type == .GRUNT {
-                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
-                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
-                    } else if enemy.type == .SLOWBOY {
-                        enemy.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
-                        enemy.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
-                    } else { // Default fallback, though all enemies should have a type
-                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION; // Or some other default
-                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                if enemy_rmb_coll.hp <= 0 && !enemy_rmb_coll.is_dying { 
+                    enemy_rmb_coll.is_dying = true;
+                    if enemy_rmb_coll.type == .GRUNT {
+                        enemy_rmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    } else if enemy_rmb_coll.type == .SLOWBOY {
+                        enemy_rmb_coll.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
+                        enemy_rmb_coll.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
+                    } else { 
+                        enemy_rmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION; 
+                        enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
-                    enemy.death_rect_offset = 0.0;
-                    // enemy.angular_vel = 0; // Optional
-
-                    // --- ADD PARTICLE SPAWN ---
-                    spawn_RMB_enemy_death_particles(enemy.pos); 
-                    // --- END ADD ---
-                    if enemy.type == .GRUNT && !state.first_grunt_killed {
+                    enemy_rmb_coll.death_rect_offset = 0.0;
+                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos); 
+                    if enemy_rmb_coll.type == .GRUNT && !state.first_grunt_killed {
                         state.first_grunt_killed = true;
-                        start_drum_err := ma.sound_start(&state.drum_track_sound);
-                        if start_drum_err == .SUCCESS {
-                            fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");
+                        start_drum_err_rmb := ma.sound_start(&state.drum_track_sound); // Renamed
+                        if start_drum_err_rmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n"); } 
+                        else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_rmb); }
+                    }
+                    // (<<< NEW SYNTH TRIGGER START >>>)
+                    if enemy_rmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
+                        state.first_slowboy_killed = true;
+                        start_synth_err := ma.sound_start(&state.synth_track_sound);
+                        if start_synth_err == .SUCCESS {
+                            fmt.printf("--- First SLOWBOY killed! Starting synth track. ---\n");
                         } else {
-                            fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err);
+                            fmt.eprintf("!!! ERROR: Failed to start synth_track_sound! Error: %v\n", start_synth_err);
                         }
                     }
+                    // (<<< NEW SYNTH TRIGGER END >>>)
                 }
-                // If particle is consumed, break from inner loop (checking this particle against other enemies)
                 break 
             }
         }
@@ -1574,67 +1382,65 @@ check_RMB_particle_enemy_collisions :: proc() {
 check_LMB_projectile_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_BLACKHOLES {
-        proj := &state.blackholes[i]
-        if !proj.active { continue }
-        proj_radius := proj.size * 0.5
+        proj_lmb_coll := &state.blackholes[i] // Renamed
+        if !proj_lmb_coll.active { continue }
+        proj_radius_lmb_coll := proj_lmb_coll.size * 0.5 // Renamed
         for j in 0..<MAX_ENEMIES {
-            enemy := &state.enemies[j]
-            if !enemy.active { continue } // Check if enemy is active
-            if enemy.is_dying { continue; } // Skip if already dying
+            enemy_lmb_coll := &state.enemies[j] // Renamed
+            if !enemy_lmb_coll.active || enemy_lmb_coll.is_dying { continue; } 
 
-            enemy_radius := enemy.current_size * 0.5
-            dist_sq := m.len_sq_vec2(proj.pos - enemy.pos)
-            radii_sum := proj_radius + enemy_radius
-            radii_sum_sq := radii_sum * radii_sum
+            enemy_radius_lmb_coll := enemy_lmb_coll.current_size * 0.5 // Renamed
+            dist_sq_lmb_coll := m.len_sq_vec2(proj_lmb_coll.pos - enemy_lmb_coll.pos) // Renamed
+            radii_sum_lmb_coll := proj_radius_lmb_coll + enemy_radius_lmb_coll // Renamed
+            radii_sum_sq_lmb_coll := radii_sum_lmb_coll * radii_sum_lmb_coll // Renamed
 
-            if dist_sq < radii_sum_sq {
-                proj.active = false    // Projectile is consumed
-                
-                enemy.hp -= LMB_PROJECTILE_DAMAGE; // Apply damage
-                fmt.printf("LMB Hit: Enemy %p, HP before sound check: %d\n", enemy, enemy.hp);
-                // Play sound based on whether enemy died or was just hit
-                if enemy.hp <= 0 {
-                    // Check if it wasn't already dying to play death sound only once
-                    if !enemy.is_dying {
-                         fmt.printf("LMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy, enemy.is_dying);
-                         //play_one_shot_sound(&state.audio_engine, &lmb_kill_explosion_audio_buffer, LMB_KILL_EXPLOSION_AMPLITUDE) // Old call
+            if dist_sq_lmb_coll < radii_sum_sq_lmb_coll {
+                proj_lmb_coll.active = false    
+                enemy_lmb_coll.hp -= LMB_PROJECTILE_DAMAGE; 
+                fmt.printf("LMB Hit: Enemy %p, HP before sound check: %d\n", enemy_lmb_coll, enemy_lmb_coll.hp);
+                if enemy_lmb_coll.hp <= 0 {
+                    if !enemy_lmb_coll.is_dying {
+                         fmt.printf("LMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy_lmb_coll, enemy_lmb_coll.is_dying);
                          ma.sound_seek_to_pcm_frame(&state.lmb_kill_sound, 0);
                          ma.sound_start(&state.lmb_kill_sound);
                     }
                 } else {
-                    fmt.printf("LMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy, enemy.hp);
-                    //play_one_shot_sound(&state.audio_engine, &lmb_hit_whoosh_audio_buffer, LMB_HIT_WHOOSH_AMPLITUDE) // Old call
+                    fmt.printf("LMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy_lmb_coll, enemy_lmb_coll.hp);
                     ma.sound_seek_to_pcm_frame(&state.lmb_hit_sound, 0);
                     ma.sound_start(&state.lmb_hit_sound);
                 }
 
-                if enemy.hp <= 0 && !enemy.is_dying { // Check if HP dropped to 0 or below AND not already dying
-                    enemy.is_dying = true;
-                    if enemy.type == .GRUNT {
-                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
-                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
-                    } else if enemy.type == .SLOWBOY {
-                        enemy.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
-                        enemy.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
-                    } else { // Default fallback
-                        enemy.dying_timer = GRUNT_DEATH_ANIM_DURATION;
-                        enemy.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                if enemy_lmb_coll.hp <= 0 && !enemy_lmb_coll.is_dying { 
+                    enemy_lmb_coll.is_dying = true;
+                    if enemy_lmb_coll.type == .GRUNT {
+                        enemy_lmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy_lmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
+                    } else if enemy_lmb_coll.type == .SLOWBOY {
+                        enemy_lmb_coll.dying_timer = SLOWBOY_DEATH_ANIM_DURATION;
+                        enemy_lmb_coll.death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION;
+                    } else { 
+                        enemy_lmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
+                        enemy_lmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
-                    enemy.death_rect_offset = 0.0;
-                    // enemy.angular_vel = 0; // Optional
-
-                    // --- ADD PARTICLE SPAWN ---
-                    spawn_LMB_enemy_death_particles(enemy.pos, enemy.color); 
-                    // --- END ADD ---
-                    if enemy.type == .GRUNT && !state.first_grunt_killed {
+                    enemy_lmb_coll.death_rect_offset = 0.0;
+                    spawn_LMB_enemy_death_particles(enemy_lmb_coll.pos, enemy_lmb_coll.color); 
+                    if enemy_lmb_coll.type == .GRUNT && !state.first_grunt_killed {
                         state.first_grunt_killed = true;
-                        start_drum_err := ma.sound_start(&state.drum_track_sound);
-                        if start_drum_err == .SUCCESS {
-                            fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");
+                        start_drum_err_lmb := ma.sound_start(&state.drum_track_sound); // Renamed
+                        if start_drum_err_lmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");} 
+                        else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_lmb); }
+                    }
+                    // (<<< NEW SYNTH TRIGGER START >>>)
+                     if enemy_lmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
+                        state.first_slowboy_killed = true;
+                        start_synth_err := ma.sound_start(&state.synth_track_sound);
+                        if start_synth_err == .SUCCESS {
+                            fmt.printf("--- First SLOWBOY killed! Starting synth track. ---\n");
                         } else {
-                            fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err);
+                            fmt.eprintf("!!! ERROR: Failed to start synth_track_sound! Error: %v\n", start_synth_err);
                         }
                     }
+                    // (<<< NEW SYNTH TRIGGER END >>>)
                 }
                 break 
             }
@@ -1642,43 +1448,25 @@ check_LMB_projectile_enemy_collisions :: proc() {
     }
 }
 
-// <<< NEW: Player-Enemy Collision Check >>>
 check_player_enemy_collisions :: proc() {
     context = runtime.default_context()
-
-    // If player is already defeated or invulnerable, no need to check further
-    if state.player_hp <= 0 || state.player_invulnerable_timer > 0.0 {
-        return
-    }
-
-    player_radius := f32(PLAYER_CORE_WORLD_RADIUS)
-
+    if state.player_hp <= 0 || state.player_invulnerable_timer > 0.0 { return }
+    player_radius_pe_coll := f32(PLAYER_CORE_WORLD_RADIUS) // Renamed
     for i in 0..<MAX_ENEMIES {
-        enemy := &state.enemies[i]
-        if !enemy.active || enemy.is_growing { // Don't collide if enemy is still growing
-            continue
-        }
-
-        enemy_radius := enemy.current_size * 0.5
-        if enemy_radius <= 0.001 { // Skip if enemy is too small to be a threat
-            continue
-        }
-
-        dist_sq := m.dist_sq_vec2(state.player_pos, enemy.pos)
-        radii_sum := player_radius + enemy_radius
-        radii_sum_sq := radii_sum * radii_sum
-
-        if dist_sq < radii_sum_sq {
-            state.player_hp -= ENEMY_GRUNT_DAMAGE_VALUE
-            state.player_hp = math.max(state.player_hp, 0) // Clamp HP to 0
+        enemy_pe_coll := &state.enemies[i] // Renamed
+        if !enemy_pe_coll.active || enemy_pe_coll.is_growing { continue }
+        enemy_radius_pe_coll := enemy_pe_coll.current_size * 0.5 // Renamed
+        if enemy_radius_pe_coll <= 0.001 { continue }
+        dist_sq_pe_coll := m.dist_sq_vec2(state.player_pos, enemy_pe_coll.pos) // Renamed
+        radii_sum_pe_coll := player_radius_pe_coll + enemy_radius_pe_coll // Renamed
+        radii_sum_sq_pe_coll := radii_sum_pe_coll * radii_sum_pe_coll // Renamed
+        if dist_sq_pe_coll < radii_sum_sq_pe_coll {
+            state.player_hp -= ENEMY_GRUNT_DAMAGE_VALUE // Assuming grunt damage for now
+            state.player_hp = math.max(state.player_hp, 0) 
             state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION
-            
-            fmt.printf("Player hit by GRUNT! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-            
-            // TODO: Later, implement enemy bounce-off logic here
-            // For now, the enemy passes through, but damage is applied and invulnerability starts.
-            
-            break // Player is hit, apply invulnerability, no need to check other enemies this frame
+            fmt.printf("Player hit by ENEMY! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
+            // TODO: Specific sound for player getting hit
+            break 
         }
     }
 }
@@ -1694,443 +1482,329 @@ emit_blackhole_projectile :: proc(proj: Blackhole_Projectile) {
 
 get_mouse_world_pos :: proc() -> m.vec2 {
     context = runtime.default_context()
-    screen_width := sapp.widthf()
-    screen_height := sapp.heightf()
-    ndc_x := (2.0 * state.mouse_screen_pos.x / screen_width) - 1.0
-    ndc_y := 1.0 - (2.0 * state.mouse_screen_pos.y / screen_height) 
-    aspect_ratio := screen_width / screen_height
-    ortho_width_vp := ORTHO_HEIGHT * aspect_ratio 
-    world_x := ndc_x * ortho_width_vp
-    world_y := ndc_y * ORTHO_HEIGHT
-    return {world_x, world_y}
+    screen_width_mouse := sapp.widthf() // Renamed
+    screen_height_mouse := sapp.heightf() // Renamed
+    ndc_x_mouse := (2.0 * state.mouse_screen_pos.x / screen_width_mouse) - 1.0 // Renamed
+    ndc_y_mouse := 1.0 - (2.0 * state.mouse_screen_pos.y / screen_height_mouse) // Renamed
+    aspect_ratio_mouse := screen_width_mouse / screen_height_mouse // Renamed
+    ortho_width_vp_mouse := ORTHO_HEIGHT * aspect_ratio_mouse // Renamed
+    world_x_mouse := ndc_x_mouse * ortho_width_vp_mouse // Renamed
+    world_y_mouse := ndc_y_mouse * ORTHO_HEIGHT // Renamed
+    return {world_x_mouse, world_y_mouse}
 }
 
 spawn_blackhole_projectile_weapon :: proc() {
     context = runtime.default_context()
-    if state.player_hp <= 0 { return; } // Don't allow actions if player is defeated
-    spawn_pos := state.player_pos
-    target_world_pos := get_mouse_world_pos()
-    direction_to_mouse := target_world_pos - spawn_pos
-    direction: m.vec2
-    if m.len_sq_vec2(direction_to_mouse) > 0.0001 { 
-        direction = m.norm_vec2(direction_to_mouse)
+    if state.player_hp <= 0 { return; } 
+    spawn_pos_bhpw := state.player_pos // Renamed
+    target_world_pos_bhpw := get_mouse_world_pos() // Renamed
+    direction_to_mouse_bhpw := target_world_pos_bhpw - spawn_pos_bhpw // Renamed
+    direction_bhpw: m.vec2 // Renamed
+    if m.len_sq_vec2(direction_to_mouse_bhpw) > 0.0001 { 
+        direction_bhpw = m.norm_vec2(direction_to_mouse_bhpw)
     } else {
-        if m.len_sq_vec2(state.player_vel) > 0.001 { direction = m.norm_vec2(state.player_vel)
-        } else { direction = {0, 1} }
+        if m.len_sq_vec2(state.player_vel) > 0.001 { direction_bhpw = m.norm_vec2(state.player_vel)
+        } else { direction_bhpw = {0, 1} }
     }
-    vel := direction * PROJECTILE_BLACKHOLE_INITIAL_SPEED
-    life := f32(PROJECTILE_BLACKHOLE_LIFETIME)
-    rotation_angle := math.atan2(direction.y, direction.x) - m.PI / 2.0 
-    new_proj := Blackhole_Projectile {
-        pos = spawn_pos, vel = vel, size = PROJECTILE_BLACKHOLE_SCALE, rotation = rotation_angle, 
-        angular_vel = 0, life_remaining = life, life_max = life, active = false, 
+    vel_bhpw := direction_bhpw * PROJECTILE_BLACKHOLE_INITIAL_SPEED // Renamed
+    life_bhpw := f32(PROJECTILE_BLACKHOLE_LIFETIME) // Renamed
+    rotation_angle_bhpw := math.atan2(direction_bhpw.y, direction_bhpw.x) - m.PI / 2.0 // Renamed
+    new_proj_bhpw := Blackhole_Projectile { // Renamed
+        pos = spawn_pos_bhpw, vel = vel_bhpw, size = PROJECTILE_BLACKHOLE_SCALE, rotation = rotation_angle_bhpw, 
+        angular_vel = 0, life_remaining = life_bhpw, life_max = life_bhpw, active = false, 
     }
-    emit_blackhole_projectile(new_proj)
+    emit_blackhole_projectile(new_proj_bhpw)
 }
 
 update_and_instance_blackholes :: proc(dt: f32) -> int {
     context = runtime.default_context()
-    live_count := 0
+    live_count_bh := 0 // Renamed
     for i in 0..<MAX_BLACKHOLES {
         if !state.blackholes[i].active { continue }
-        p := &state.blackholes[i]
-        p.life_remaining -= dt
-        if p.life_remaining <= 0.0 { p.active = false; continue }
-        p.pos += p.vel * dt
-        p.rotation += p.angular_vel * dt
-        if p.rotation > m.TAU { p.rotation -= m.TAU }
-        if p.rotation < 0    { p.rotation += m.TAU }
-        life_ratio := p.life_remaining / p.life_max
-        if live_count < MAX_BLACKHOLES {
-            inst := &state.blackhole_instance_data[live_count]
-            inst.instance_pos_size_rot = {p.pos.x, p.pos.y, p.size, p.rotation}
-            inst.instance_color = {1.0, 1.0, 1.0, life_ratio} 
-            live_count += 1
+        p_bh := &state.blackholes[i] // Renamed
+        p_bh.life_remaining -= dt
+        if p_bh.life_remaining <= 0.0 { p_bh.active = false; continue }
+        p_bh.pos += p_bh.vel * dt
+        p_bh.rotation += p_bh.angular_vel * dt // This was 0 from spawn, but could be used
+        if p_bh.rotation > m.TAU { p_bh.rotation -= m.TAU }
+        if p_bh.rotation < 0    { p_bh.rotation += m.TAU }
+        life_ratio_bh := p_bh.life_remaining / p_bh.life_max // Renamed
+        if live_count_bh < MAX_BLACKHOLES {
+            inst_bh := &state.blackhole_instance_data[live_count_bh] // Renamed
+            inst_bh.instance_pos_size_rot = {p_bh.pos.x, p_bh.pos.y, p_bh.size, p_bh.rotation}
+            inst_bh.instance_color = {1.0, 1.0, 1.0, life_ratio_bh} 
+            live_count_bh += 1
         }
     }
-    return live_count
+    return live_count_bh
 }
 
 
 // --- Enemy System ---
 emit_enemy :: proc(enemy_data: Enemy) {
     context = runtime.default_context()
-    idx_to_write := state.next_enemy_index
-    state.enemies[idx_to_write] = enemy_data        
-    state.enemies[idx_to_write].active = true       
+    idx_to_write_en := state.next_enemy_index // Renamed
+    state.enemies[idx_to_write_en] = enemy_data        
+    state.enemies[idx_to_write_en].active = true       
     state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
-spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: EnemyType) { // MODIFIED SIGNATURE
+spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: EnemyType) { 
     context = runtime.default_context()
-    start_pos: m.vec2
-    valid_spawn_found := false
-    for attempt in 0..<ENEMY_MAX_SPAWN_ATTEMPTS {
-        side := rand.int31() % 4 
-        random_depth := rand.float32() * ENEMY_SPAWN_BORDER_FRACTION 
-        switch side {
-        case 0: start_pos.y = current_ortho_height * (1.0 - random_depth); start_pos.x = (rand.float32() * 2.0 - 1.0) * current_ortho_width 
-        case 1: start_pos.y = -current_ortho_height * (1.0 - random_depth); start_pos.x = (rand.float32() * 2.0 - 1.0) * current_ortho_width
-        case 2: start_pos.x = -current_ortho_width * (1.0 - random_depth); start_pos.y = (rand.float32() * 2.0 - 1.0) * current_ortho_height
-        case 3: start_pos.x = current_ortho_width * (1.0 - random_depth); start_pos.y = (rand.float32() * 2.0 - 1.0) * current_ortho_height
+    start_pos_en: m.vec2 // Renamed
+    valid_spawn_found_en := false // Renamed
+    for attempt_en in 0..<ENEMY_MAX_SPAWN_ATTEMPTS { // Renamed
+        side_en := rand.int31() % 4 // Renamed
+        random_depth_en := rand.float32() * ENEMY_SPAWN_BORDER_FRACTION // Renamed
+        switch side_en {
+        case 0: start_pos_en.y = current_ortho_height * (1.0 - random_depth_en); start_pos_en.x = (rand.float32() * 2.0 - 1.0) * current_ortho_width 
+        case 1: start_pos_en.y = -current_ortho_height * (1.0 - random_depth_en); start_pos_en.x = (rand.float32() * 2.0 - 1.0) * current_ortho_width
+        case 2: start_pos_en.x = -current_ortho_width * (1.0 - random_depth_en); start_pos_en.y = (rand.float32() * 2.0 - 1.0) * current_ortho_height
+        case 3: start_pos_en.x = current_ortho_width * (1.0 - random_depth_en); start_pos_en.y = (rand.float32() * 2.0 - 1.0) * current_ortho_height
         }
-        dist_sq_to_player := m.len_sq_vec2(start_pos - player_pos)
-        if dist_sq_to_player >= ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ { valid_spawn_found = true; break; }
+        dist_sq_to_player_en := m.len_sq_vec2(start_pos_en - player_pos) // Renamed
+        if dist_sq_to_player_en >= ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ { valid_spawn_found_en = true; break; }
     }
-    if !valid_spawn_found {
+    if !valid_spawn_found_en {
         fmt.printf("spawn_enemy: WARNING - Could not find a suitable spawn point after %d attempts. Using fallback.\n", ENEMY_MAX_SPAWN_ATTEMPTS)
-        start_pos.y = current_ortho_height * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
-        start_pos.x = -current_ortho_width * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
+        start_pos_en.y = current_ortho_height * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
+        start_pos_en.x = -current_ortho_width * (1.0 - ENEMY_SPAWN_BORDER_FRACTION * 0.5) 
     }
-    start_vel: m.vec2 = {0.0, 0.0} 
-    initial_wander_angle := rand.float32() * m.TAU
-    initial_wander_vector := m.angle_to_vec2(initial_wander_angle)
+    start_vel_en: m.vec2 = {0.0, 0.0} // Renamed
+    initial_wander_angle_en := rand.float32() * m.TAU // Renamed
+    initial_wander_vector_en := m.angle_to_vec2(initial_wander_angle_en) // Renamed
 
     enemy_to_spawn: Enemy
-
-    // MODIFIED: Direct type assignment based on parameter
     if type_to_spawn == .GRUNT {
-        base_grunt_rgb := m.vec3{0.9, 0.1, 0.7} 
-        grunt_color := m.vec4{base_grunt_rgb.r, base_grunt_rgb.g, base_grunt_rgb.b, ENEMY_BASE_ALPHA}
+        base_grunt_rgb_en := m.vec3{0.9, 0.1, 0.7} // Renamed
+        grunt_color_en := m.vec4{base_grunt_rgb_en.r, base_grunt_rgb_en.g, base_grunt_rgb_en.b, ENEMY_BASE_ALPHA} // Renamed
         enemy_to_spawn = Enemy {
-            pos = start_pos, 
-            vel = start_vel, 
-            color = grunt_color, 
-            target_size = ENEMY_GRUNT_SCALE, 
-            current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
-            grow_timer = ENEMY_GROW_DURATION, 
-            is_growing = true,                                             
-            rotation = rand.float32() * m.TAU, 
-            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED,
-            hp = ENEMY_GRUNT_MAX_HP, 
-            type = .GRUNT, // Explicitly set type
-            active = false, 
-            current_wander_vector = initial_wander_vector,
+            pos = start_pos_en, vel = start_vel_en, color = grunt_color_en, 
+            target_size = ENEMY_GRUNT_SCALE, current_size = ENEMY_GRUNT_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
+            grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
+            rotation = rand.float32() * m.TAU, angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED,
+            hp = ENEMY_GRUNT_MAX_HP, type = .GRUNT, active = false, 
+            current_wander_vector = initial_wander_vector_en,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
-            is_dying = false,
-            dying_timer = 0.0,
-            death_rect_offset = 0.0,
+            is_dying = false, dying_timer = 0.0, death_rect_offset = 0.0,
             death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION,
         }
     } else if type_to_spawn == .SLOWBOY {
-        slowboy_color_initial := m.vec4{0.3, 0.7, 0.9, ENEMY_BASE_ALPHA} // Light blue
+        slowboy_color_initial_en := m.vec4{0.3, 0.7, 0.9, ENEMY_BASE_ALPHA} // Renamed
         enemy_to_spawn = Enemy {
-            pos = start_pos, 
-            vel = start_vel, 
-            color = slowboy_color_initial, 
+            pos = start_pos_en, vel = start_vel_en, color = slowboy_color_initial_en, 
             target_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_SLOWBOY_GLOW_CANVAS_SF, 
             current_size = ENEMY_SLOWBOY_BASE_SCALE * ENEMY_INITIAL_SCALE_FACTOR, 
-            grow_timer = ENEMY_GROW_DURATION,
-            is_growing = true,                                             
-            rotation = rand.float32() * m.TAU, 
-            angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5,
-            hp = ENEMY_SLOWBOY_MAX_HP, 
-            type = .SLOWBOY, // Explicitly set type
-            active = false, 
-            current_wander_vector = initial_wander_vector,
+            grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
+            rotation = rand.float32() * m.TAU, angular_vel = (rand.float32() * 2.0 - 1.0) * ENEMY_MAX_ANGULAR_SPEED * 0.5,
+            hp = ENEMY_SLOWBOY_MAX_HP, type = .SLOWBOY, active = false, 
+            current_wander_vector = initial_wander_vector_en,
             wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
-            is_dying = false,
-            dying_timer = 0.0,
-            death_rect_offset = 0.0,
+            is_dying = false, dying_timer = 0.0, death_rect_offset = 0.0,
             death_anim_max_duration = SLOWBOY_DEATH_ANIM_DURATION,
-            is_winding_up_attack = false,
-            attack_windup_timer = 0.0,
-            has_locked_attack_trajectory = false,
-            attack_charge_target_pos = {0,0},
-            is_charging_attack = false,
-            attack_charge_start_pos = {0,0},
+            is_winding_up_attack = false, attack_windup_timer = 0.0,
+            has_locked_attack_trajectory = false, attack_charge_target_pos = {0,0},
+            is_charging_attack = false, attack_charge_start_pos = {0,0},
         }
     } else {
         fmt.printf("spawn_enemy: WARNING - Unknown type_to_spawn: %v\n", type_to_spawn);
-        return; // Do not spawn if type is unknown
+        return; 
     }
     emit_enemy(enemy_to_spawn)
 }
 update_and_instance_enemies :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_enemy_count := 0
-    player_pos := state.player_pos
+    player_pos_uie := state.player_pos // Renamed
 
     for i in 0..<MAX_ENEMIES {
         if !state.enemies[i].active { continue }
-        enemy := &state.enemies[i]
+        enemy_uie := &state.enemies[i] // Renamed
 
-        has_updated_pos_for_charge_bounce := false; // <<< NEW FLAG
+        has_updated_pos_for_charge_bounce_uie := false; // Renamed
 
-        current_visual_scale_for_shader: f32
-        effect_params_x: f32 = 0.0; // is_dying
-        effect_params_y: f32 = 0.0; // death_rect_offset
-        effect_params_z: f32 = 1.0; 
-        effect_params_w: f32 = 1.0; 
+        current_visual_scale_for_shader_uie: f32 // Renamed
+        effect_params_x_uie: f32 = 0.0; // Renamed
+        effect_params_y_uie: f32 = 0.0; // Renamed
+        effect_params_z_uie: f32 = 1.0; // Renamed
+        effect_params_w_uie: f32 = 1.0; // Renamed
 
-        if enemy.is_dying {
-            effect_params_x = 1.0; 
-            effect_params_y = enemy.death_rect_offset;
-            // z and w for dying are set based on progress_raw later in this block
-            enemy.dying_timer -= dt;
-            enemy.death_rect_offset += ENEMY_DEATH_RECT_SEPARATION_SPEED * dt;
+        if enemy_uie.is_dying {
+            effect_params_x_uie = 1.0; 
+            effect_params_y_uie = enemy_uie.death_rect_offset;
+            enemy_uie.dying_timer -= dt;
+            enemy_uie.death_rect_offset += ENEMY_DEATH_RECT_SEPARATION_SPEED * dt;
             
-            if enemy.dying_timer <= 0.0 {
-                enemy.active = false;
-                continue;
-            }
+            if enemy_uie.dying_timer <= 0.0 { enemy_uie.active = false; continue; }
 
-            progress_raw: f32
-            if enemy.death_anim_max_duration > 0.0 { // Avoid division by zero if not set
-                progress_raw = 1.0 - math.clamp(enemy.dying_timer / enemy.death_anim_max_duration, 0.0, 1.0);
-            } else { // Fallback if death_anim_max_duration is somehow zero
-                progress_raw = 0.0; 
-            }
-            eased_progress_for_scale := math.pow(progress_raw, 2.5); // For slower shrink at start
-
-
-
-
-            effect_params_w = 1.0 - progress_raw; 
-            initial_part_uv_scale : f32 = 1.0 / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER; 
-            final_part_uv_scale : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER;
-            effect_params_z = m.lerp(initial_part_uv_scale, final_part_uv_scale, eased_progress_for_scale); 
-
-            current_visual_scale_for_shader = enemy.target_size;
-            enemy.current_size = f32(m.lerp(enemy.target_size, enemy.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale)); // Cast to f32
+            progress_raw_uie: f32 // Renamed
+            if enemy_uie.death_anim_max_duration > 0.0 { 
+                progress_raw_uie = 1.0 - math.clamp(enemy_uie.dying_timer / enemy_uie.death_anim_max_duration, 0.0, 1.0);
+            } else { progress_raw_uie = 0.0;  }
+            eased_progress_for_scale_uie := math.pow(progress_raw_uie, 2.5); // Renamed
+            effect_params_w_uie = 1.0 - progress_raw_uie; 
+            initial_part_uv_scale_uie : f32 = 1.0 / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER; // Renamed
+            final_part_uv_scale_uie : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR / ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER; // Renamed
+            effect_params_z_uie = m.lerp(initial_part_uv_scale_uie, final_part_uv_scale_uie, eased_progress_for_scale_uie); 
+            current_visual_scale_for_shader_uie = enemy_uie.target_size;
+            enemy_uie.current_size = f32(m.lerp(enemy_uie.target_size, enemy_uie.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, eased_progress_for_scale_uie)); 
         
-        } else if enemy.type == .SLOWBOY && enemy.is_winding_up_attack {
-            effect_params_x = 0.0; 
-            effect_params_y = 1.0; 
-            effect_params_z = enemy.attack_windup_timer; 
-            effect_params_w = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION; 
-            
-            current_visual_scale_for_shader = enemy.current_size; 
-
-            // WINDUP LOGIC
-            enemy.attack_windup_timer -= dt;
-            if enemy.attack_windup_timer <= SLOWBOY_ATTACK_LOCKON_TIME_REMAINING && !enemy.has_locked_attack_trajectory {
-                enemy.attack_charge_target_pos = player_pos; // player_pos is available in this function
-                enemy.has_locked_attack_trajectory = true;
+        } else if enemy_uie.type == .SLOWBOY && enemy_uie.is_winding_up_attack {
+            effect_params_x_uie = 0.0; 
+            effect_params_y_uie = 1.0; 
+            effect_params_z_uie = enemy_uie.attack_windup_timer; 
+            effect_params_w_uie = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION; 
+            current_visual_scale_for_shader_uie = enemy_uie.current_size; 
+            enemy_uie.attack_windup_timer -= dt;
+            if enemy_uie.attack_windup_timer <= SLOWBOY_ATTACK_LOCKON_TIME_REMAINING && !enemy_uie.has_locked_attack_trajectory {
+                enemy_uie.attack_charge_target_pos = player_pos_uie; 
+                enemy_uie.has_locked_attack_trajectory = true;
             }
-            if enemy.attack_windup_timer <= 0.0 {
-                enemy.is_winding_up_attack = false;
-                enemy.is_charging_attack = true;
-                enemy.attack_charge_start_pos = enemy.pos;
-                
-                charge_direction_vec := enemy.attack_charge_target_pos - enemy.attack_charge_start_pos;
-                if m.len_sq_vec2(charge_direction_vec) > 0.0001 { // Avoid normalization of zero vector
-                    charge_direction_vec = m.norm_vec2(charge_direction_vec);
-                } else {
-                    // Fallback direction if target is same as start (e.g., player didn't move)
-                    // Default to moving "forward" relative to current orientation or a default like {0,1}
-                    // For simplicity, let's use a default if no player velocity either.
-                    // A better fallback might be based on player's last known movement or enemy's current facing.
-                    // Given the context, if player is at the exact same spot, a small nudge or default direction.
-                    // We can use player's current direction if available, or a default.
-                    // The problem statement implies player_pos is the target, so this case is rare.
-                    // If player is somehow exactly on top of enemy start, pick a default.
-                    charge_direction_vec = m.vec2{0, 1}; // Default direction (e.g., upwards)
-                }
-                enemy.vel = charge_direction_vec * PLAYER_MAX_SPEED * SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR;
-                enemy.angular_vel = 0; // Stop spinning during charge
+            if enemy_uie.attack_windup_timer <= 0.0 {
+                enemy_uie.is_winding_up_attack = false;
+                enemy_uie.is_charging_attack = true;
+                enemy_uie.attack_charge_start_pos = enemy_uie.pos;
+                charge_direction_vec_uie := enemy_uie.attack_charge_target_pos - enemy_uie.attack_charge_start_pos; // Renamed
+                if m.len_sq_vec2(charge_direction_vec_uie) > 0.0001 { 
+                    charge_direction_vec_uie = m.norm_vec2(charge_direction_vec_uie);
+                } else { charge_direction_vec_uie = m.vec2{0, 1}; }
+                enemy_uie.vel = charge_direction_vec_uie * PLAYER_MAX_SPEED * SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR;
+                enemy_uie.angular_vel = 0; 
             }
         
-        } else if enemy.is_growing {
-            effect_params_x = 0.0; 
-            effect_params_y = 0.0; 
-            if enemy.type == .SLOWBOY { 
-                effect_params_z = ENEMY_SLOWBOY_GLOW_CANVAS_SF;
-            } else { 
-                effect_params_z = 1.0; 
-            }
-            effect_params_w = 1.0; 
+        } else if enemy_uie.is_growing {
+            effect_params_x_uie = 0.0; 
+            effect_params_y_uie = 0.0; 
+            if enemy_uie.type == .SLOWBOY { effect_params_z_uie = ENEMY_SLOWBOY_GLOW_CANVAS_SF; } 
+            else { effect_params_z_uie = 1.0; }
+            effect_params_w_uie = 1.0; 
 
-            enemy.grow_timer -= dt;
-            if enemy.grow_timer <= 0.0 {
-                enemy.current_size = enemy.target_size;
-                enemy.is_growing = false;
-                enemy.grow_timer = 0.0;
+            enemy_uie.grow_timer -= dt;
+            if enemy_uie.grow_timer <= 0.0 {
+                enemy_uie.current_size = enemy_uie.target_size;
+                enemy_uie.is_growing = false;
+                enemy_uie.grow_timer = 0.0;
             } else {
-                progress := 1.0 - (enemy.grow_timer / ENEMY_GROW_DURATION);
-                progress = math.clamp(progress, 0.0, 1.0); // Use simple linear progress for grow
-                initial_actual_size := enemy.target_size * ENEMY_INITIAL_SCALE_FACTOR;
-                enemy.current_size = m.lerp(initial_actual_size, enemy.target_size, progress);
+                progress_grow_uie := 1.0 - (enemy_uie.grow_timer / ENEMY_GROW_DURATION); // Renamed
+                progress_grow_uie = math.clamp(progress_grow_uie, 0.0, 1.0); 
+                initial_actual_size_uie := enemy_uie.target_size * ENEMY_INITIAL_SCALE_FACTOR; // Renamed
+                enemy_uie.current_size = m.lerp(initial_actual_size_uie, enemy_uie.target_size, progress_grow_uie);
             }
-            current_visual_scale_for_shader = enemy.current_size;
-            
-            enemy.rotation += enemy.angular_vel * dt;
-            
-            enemy.wander_timer -= dt;
-            if enemy.wander_timer <= 0.0 {
-                new_wander_angle := rand.float32() * m.TAU;
-                enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
-                enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+            current_visual_scale_for_shader_uie = enemy_uie.current_size;
+            enemy_uie.rotation += enemy_uie.angular_vel * dt;
+            enemy_uie.wander_timer -= dt;
+            if enemy_uie.wander_timer <= 0.0 {
+                new_wander_angle_uie := rand.float32() * m.TAU; // Renamed
+                enemy_uie.current_wander_vector = m.angle_to_vec2(new_wander_angle_uie);
+                enemy_uie.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
             }
-            direction_to_player_strict_growing := player_pos - enemy.pos; // Use a different variable name to avoid conflict
-            final_direction_growing := direction_to_player_strict_growing;
-            dist_sq_to_player_growing := m.len_sq_vec2(direction_to_player_strict_growing);
-            if dist_sq_to_player_growing > 0.001 {
-                normalized_strict_direction_growing := m.norm_vec2(direction_to_player_strict_growing);
-                final_direction_growing = normalized_strict_direction_growing + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+            direction_to_player_strict_growing_uie := player_pos_uie - enemy_uie.pos; // Renamed
+            final_direction_growing_uie := direction_to_player_strict_growing_uie; // Renamed
+            dist_sq_to_player_growing_uie := m.len_sq_vec2(direction_to_player_strict_growing_uie); // Renamed
+            if dist_sq_to_player_growing_uie > 0.001 {
+                normalized_strict_direction_growing_uie := m.norm_vec2(direction_to_player_strict_growing_uie); // Renamed
+                final_direction_growing_uie = normalized_strict_direction_growing_uie + (enemy_uie.current_wander_vector * ENEMY_WANDER_INFLUENCE);
             }
-            if dist_sq_to_player_growing > 0.00001 {
-                normalized_final_direction_growing := m.norm_vec2(final_direction_growing);
-                current_speed_growing : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = normalized_final_direction_growing * current_speed_growing;
-            } else if m.len_sq_vec2(direction_to_player_strict_growing) > 0.00001 {
-                current_speed_growing : f32 = enemy.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED;
-                enemy.vel = m.norm_vec2(direction_to_player_strict_growing) * current_speed_growing;
-            } else { enemy.vel = m.vec2_zero(); }
-            // enemy.pos update is now after all logic including attack states
-
-
-        } else { // Alive and not growing (normal behavior OR SlowBoy attack logic)
-            enemy.current_size = enemy.target_size;
-            current_visual_scale_for_shader = enemy.current_size; 
+            current_speed_growing_uie : f32 = enemy_uie.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED; // Renamed
+            if dist_sq_to_player_growing_uie > 0.00001 {
+                normalized_final_direction_growing_uie := m.norm_vec2(final_direction_growing_uie); // Renamed
+                enemy_uie.vel = normalized_final_direction_growing_uie * current_speed_growing_uie;
+            } else if m.len_sq_vec2(direction_to_player_strict_growing_uie) > 0.00001 {
+                enemy_uie.vel = m.norm_vec2(direction_to_player_strict_growing_uie) * current_speed_growing_uie;
+            } else { enemy_uie.vel = m.vec2_zero(); }
+        } else { 
+            enemy_uie.current_size = enemy_uie.target_size;
+            current_visual_scale_for_shader_uie = enemy_uie.current_size; 
+            enemy_uie.rotation += enemy_uie.angular_vel * dt;
+            effect_params_x_uie = 0.0;
+            effect_params_y_uie = 0.0;
+            effect_params_w_uie = 1.0;
+            if enemy_uie.type == .SLOWBOY { effect_params_z_uie = ENEMY_SLOWBOY_GLOW_CANVAS_SF; } 
+            else { effect_params_z_uie = 1.0; }
             
-            current_visual_scale_for_shader = enemy.current_size; 
-            
-            // This 'else' block handles enemies that are ALIVE and NOT GROWING.
-            // (Also, if it's a SlowBoy, it's NOT WINDING UP, as that's a separate `else if` branch)
-            current_visual_scale_for_shader = enemy.current_size;
-            enemy.rotation += enemy.angular_vel * dt;
-
-            // Default effect_params for this state.
-            effect_params_x = 0.0;
-            effect_params_y = 0.0;
-            effect_params_w = 1.0;
-            if enemy.type == .SLOWBOY {
-                effect_params_z = ENEMY_SLOWBOY_GLOW_CANVAS_SF;
-            } else { // Grunt
-                effect_params_z = 1.0;
-            }
-            
-            if enemy.type == .SLOWBOY {
-                 // Note: enemy.is_winding_up_attack is handled by the `else if` block above.
-                 // So, this code runs if the SlowBoy is NOT winding up.
-                player_dist_sq := m.dist_sq_vec2(enemy.pos, player_pos);
-                if enemy.is_charging_attack {
-                    has_updated_pos_for_charge_bounce = true; // Mark that this SlowBoy's position update is handled here
-
-                    // --- Screen Boundary Calculations ---
-                    aspect_ratio := sapp.widthf() / sapp.heightf();
-                    current_ortho_width := ORTHO_HEIGHT * aspect_ratio;
-                    enemy_half_size := enemy.current_size * 0.5;
-
-                    min_x := -current_ortho_width + enemy_half_size;
-                    max_x :=  current_ortho_width - enemy_half_size;
-                    min_y := -ORTHO_HEIGHT + enemy_half_size;
-                    max_y :=  ORTHO_HEIGHT - enemy_half_size;
-
-                    // --- Position Update (specific for charging SlowBoy) ---
-                    enemy.pos += enemy.vel * dt;
-
-                    // --- Bounce Logic ---
-                    if enemy.pos.x < min_x {
-                        enemy.pos.x = min_x;
-                        enemy.vel.x *= -1;
-                    } else if enemy.pos.x > max_x {
-                        enemy.pos.x = max_x;
-                        enemy.vel.x *= -1;
+            if enemy_uie.type == .SLOWBOY {
+                player_dist_sq_uie := m.dist_sq_vec2(enemy_uie.pos, player_pos_uie); // Renamed
+                if enemy_uie.is_charging_attack {
+                    has_updated_pos_for_charge_bounce_uie = true; 
+                    aspect_ratio_uie := sapp.widthf() / sapp.heightf(); // Renamed
+                    current_ortho_width_uie := ORTHO_HEIGHT * aspect_ratio_uie; // Renamed
+                    enemy_half_size_uie := enemy_uie.current_size * 0.5; // Renamed
+                    min_x_uie := -current_ortho_width_uie + enemy_half_size_uie; max_x_uie :=  current_ortho_width_uie - enemy_half_size_uie; // Renamed
+                    min_y_uie := -ORTHO_HEIGHT + enemy_half_size_uie; max_y_uie :=  ORTHO_HEIGHT - enemy_half_size_uie; // Renamed
+                    enemy_uie.pos += enemy_uie.vel * dt;
+                    if enemy_uie.pos.x < min_x_uie { enemy_uie.pos.x = min_x_uie; enemy_uie.vel.x *= -1; } 
+                    else if enemy_uie.pos.x > max_x_uie { enemy_uie.pos.x = max_x_uie; enemy_uie.vel.x *= -1; }
+                    if enemy_uie.pos.y < min_y_uie { enemy_uie.pos.y = min_y_uie; enemy_uie.vel.y *= -1; } 
+                    else if enemy_uie.pos.y > max_y_uie { enemy_uie.pos.y = max_y_uie; enemy_uie.vel.y *= -1; }
+                    charge_distance_world_units_uie : f32 = ORTHO_HEIGHT * 2.0 * SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION; // Renamed
+                    charge_distance_sq_uie := charge_distance_world_units_uie * charge_distance_world_units_uie; // Renamed
+                    if m.dist_sq_vec2(enemy_uie.pos, enemy_uie.attack_charge_start_pos) >= charge_distance_sq_uie {
+                        enemy_uie.is_charging_attack = false; enemy_uie.vel = {0,0}; 
                     }
-
-                    if enemy.pos.y < min_y {
-                        enemy.pos.y = min_y;
-                        enemy.vel.y *= -1;
-                    } else if enemy.pos.y > max_y {
-                        enemy.pos.y = max_y;
-                        enemy.vel.y *= -1;
-                    }
-                    
-                    // --- Original Charge Distance Check ---
-                    charge_distance_world_units: f32 = ORTHO_HEIGHT * 2.0 * SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION;
-                    charge_distance_sq := charge_distance_world_units * charge_distance_world_units;
-                    
-                    if m.dist_sq_vec2(enemy.pos, enemy.attack_charge_start_pos) >= charge_distance_sq {
-                        enemy.is_charging_attack = false;
-                        enemy.vel = {0,0}; // Stop movement
-                    }
-                } else { // SLOWBOY IS ALIVE, NOT GROWING, NOT WINDING, NOT CHARGING
-                    // effect_params are already set to normal for SlowBoy.
-                    if player_dist_sq < (SLOWBOY_ATTACK_DETECT_RANGE * SLOWBOY_ATTACK_DETECT_RANGE) && !enemy.is_winding_up_attack && !enemy.is_charging_attack {
-                        enemy.is_winding_up_attack = true;
-                        enemy.attack_windup_timer = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION;
-                        enemy.has_locked_attack_trajectory = false;
-                        enemy.is_charging_attack = false;
-                        enemy.vel = {0,0}; 
-                        // The specific effect_params for wind-up will be set in the next frame
-                        // by the `else if enemy.type == .SLOWBOY && enemy.is_winding_up_attack` block.
+                } else { 
+                    if player_dist_sq_uie < (SLOWBOY_ATTACK_DETECT_RANGE * SLOWBOY_ATTACK_DETECT_RANGE) && !enemy_uie.is_winding_up_attack && !enemy_uie.is_charging_attack {
+                        enemy_uie.is_winding_up_attack = true; enemy_uie.attack_windup_timer = SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION;
+                        enemy_uie.has_locked_attack_trajectory = false; enemy_uie.is_charging_attack = false;
+                        enemy_uie.vel = {0,0}; 
                     } else {
-                        // Standard SlowBoy non-attacking movement logic
-                        enemy.wander_timer -= dt;
-                        if enemy.wander_timer <= 0.0 {
-                            new_wander_angle := rand.float32() * m.TAU;
-                            enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
-                            enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+                        enemy_uie.wander_timer -= dt;
+                        if enemy_uie.wander_timer <= 0.0 {
+                            new_wander_angle_norm_uie := rand.float32() * m.TAU; // Renamed
+                            enemy_uie.current_wander_vector = m.angle_to_vec2(new_wander_angle_norm_uie);
+                            enemy_uie.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
                         }
-                        direction_to_player_strict_normal := player_pos - enemy.pos;
-                        final_direction_normal := direction_to_player_strict_normal;
-                        dist_sq_to_player_normal := m.len_sq_vec2(direction_to_player_strict_normal);
-                        if dist_sq_to_player_normal > 0.001 {
-                            normalized_strict_direction_normal := m.norm_vec2(direction_to_player_strict_normal);
-                            final_direction_normal = normalized_strict_direction_normal + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+                        direction_to_player_strict_normal_uie := player_pos_uie - enemy_uie.pos; // Renamed
+                        final_direction_normal_uie := direction_to_player_strict_normal_uie; // Renamed
+                        dist_sq_to_player_normal_uie := m.len_sq_vec2(direction_to_player_strict_normal_uie); // Renamed
+                        if dist_sq_to_player_normal_uie > 0.001 {
+                            normalized_strict_direction_normal_uie := m.norm_vec2(direction_to_player_strict_normal_uie); // Renamed
+                            final_direction_normal_uie = normalized_strict_direction_normal_uie + (enemy_uie.current_wander_vector * ENEMY_WANDER_INFLUENCE);
                         }
-                        if dist_sq_to_player_normal > 0.00001 {
-                            normalized_final_direction_normal := m.norm_vec2(final_direction_normal);
-                            enemy.vel = normalized_final_direction_normal * ENEMY_SLOWBOY_SPEED;
-                        } else if m.len_sq_vec2(direction_to_player_strict_normal) > 0.00001 {
-                             enemy.vel = m.norm_vec2(direction_to_player_strict_normal) * ENEMY_SLOWBOY_SPEED;
-                        } else { enemy.vel = m.vec2_zero(); }
+                        if dist_sq_to_player_normal_uie > 0.00001 {
+                            normalized_final_direction_normal_uie := m.norm_vec2(final_direction_normal_uie); // Renamed
+                            enemy_uie.vel = normalized_final_direction_normal_uie * ENEMY_SLOWBOY_SPEED;
+                        } else if m.len_sq_vec2(direction_to_player_strict_normal_uie) > 0.00001 {
+                             enemy_uie.vel = m.norm_vec2(direction_to_player_strict_normal_uie) * ENEMY_SLOWBOY_SPEED;
+                        } else { enemy_uie.vel = m.vec2_zero(); }
                     }
                 }
-            } else if enemy.type == .GRUNT {
-                 // Normal effect_params for Grunt
-                effect_params_x = 0.0;
-                effect_params_y = 0.0; 
-                effect_params_z = 1.0; 
-                effect_params_w = 1.0;
-                // Standard Grunt movement logic
-                enemy.wander_timer -= dt;
-                if enemy.wander_timer <= 0.0 {
-                    new_wander_angle := rand.float32() * m.TAU;
-                    enemy.current_wander_vector = m.angle_to_vec2(new_wander_angle);
-                    enemy.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
+            } else if enemy_uie.type == .GRUNT {
+                enemy_uie.wander_timer -= dt;
+                if enemy_uie.wander_timer <= 0.0 {
+                    new_wander_angle_grunt_uie := rand.float32() * m.TAU; // Renamed
+                    enemy_uie.current_wander_vector = m.angle_to_vec2(new_wander_angle_grunt_uie);
+                    enemy_uie.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL + rand.float32_range(-0.2, 0.2);
                 }
-                direction_to_player_strict_grunt := player_pos - enemy.pos;
-                final_direction_grunt := direction_to_player_strict_grunt;
-                dist_sq_to_player_grunt := m.len_sq_vec2(direction_to_player_strict_grunt);
-                if dist_sq_to_player_grunt > 0.001 {
-                    normalized_strict_direction_grunt := m.norm_vec2(direction_to_player_strict_grunt);
-                    final_direction_grunt = normalized_strict_direction_grunt + (enemy.current_wander_vector * ENEMY_WANDER_INFLUENCE);
+                direction_to_player_strict_grunt_uie := player_pos_uie - enemy_uie.pos; // Renamed
+                final_direction_grunt_uie := direction_to_player_strict_grunt_uie; // Renamed
+                dist_sq_to_player_grunt_uie := m.len_sq_vec2(direction_to_player_strict_grunt_uie); // Renamed
+                if dist_sq_to_player_grunt_uie > 0.001 {
+                    normalized_strict_direction_grunt_uie := m.norm_vec2(direction_to_player_strict_grunt_uie); // Renamed
+                    final_direction_grunt_uie = normalized_strict_direction_grunt_uie + (enemy_uie.current_wander_vector * ENEMY_WANDER_INFLUENCE);
                 }
-                if dist_sq_to_player_grunt > 0.00001 {
-                    normalized_final_direction_grunt := m.norm_vec2(final_direction_grunt);
-                    enemy.vel = normalized_final_direction_grunt * ENEMY_GRUNT_SPEED;
-                } else if m.len_sq_vec2(direction_to_player_strict_grunt) > 0.00001 {
-                     enemy.vel = m.norm_vec2(direction_to_player_strict_grunt) * ENEMY_GRUNT_SPEED;
-                } else { enemy.vel = m.vec2_zero(); }
+                if dist_sq_to_player_grunt_uie > 0.00001 {
+                    normalized_final_direction_grunt_uie := m.norm_vec2(final_direction_grunt_uie); // Renamed
+                    enemy_uie.vel = normalized_final_direction_grunt_uie * ENEMY_GRUNT_SPEED;
+                } else if m.len_sq_vec2(direction_to_player_strict_grunt_uie) > 0.00001 {
+                     enemy_uie.vel = m.norm_vec2(direction_to_player_strict_grunt_uie) * ENEMY_GRUNT_SPEED;
+                } else { enemy_uie.vel = m.vec2_zero(); }
             }
         }
         
-        if !has_updated_pos_for_charge_bounce {
-            enemy.pos += enemy.vel * dt; 
-        }
-
-        // Common rotation and instancing
-        if enemy.rotation > m.TAU { enemy.rotation -= m.TAU; }
-        if enemy.rotation < 0    { enemy.rotation += m.TAU; }
+        if !has_updated_pos_for_charge_bounce_uie { enemy_uie.pos += enemy_uie.vel * dt;  }
+        if enemy_uie.rotation > m.TAU { enemy_uie.rotation -= m.TAU; }
+        if enemy_uie.rotation < 0    { enemy_uie.rotation += m.TAU; }
 
         if live_enemy_count < MAX_ENEMIES {
-            inst := &state.enemy_instance_data[live_enemy_count];
-            inst.instance_pos = enemy.pos;
-            inst.instance_main_rotation = enemy.rotation;
-            inst.instance_visual_scale = current_visual_scale_for_shader * 3.0;
-            inst.instance_color = enemy.color;
-            inst.instance_effect_params = {effect_params_x, effect_params_y, effect_params_z, effect_params_w};
-            // Set enemy type for shader (0.0 for Grunt, 1.0 for SlowBoy)
-            if enemy.type == .GRUNT {
-                inst.instance_enemy_type = 0.0;
-            } else if enemy.type == .SLOWBOY {
-                inst.instance_enemy_type = 1.0;
-            } else {
-                inst.instance_enemy_type = 0.0; // Default / fallback
-            }
+            inst_uie := &state.enemy_instance_data[live_enemy_count]; // Renamed
+            inst_uie.instance_pos = enemy_uie.pos;
+            inst_uie.instance_main_rotation = enemy_uie.rotation;
+            inst_uie.instance_visual_scale = current_visual_scale_for_shader_uie * 3.0; // This 3.0 might be related to the quad size used (particle_quad_vbo). If base quad is -0.5 to 0.5 (size 1), then scale is direct.
+            inst_uie.instance_color = enemy_uie.color;
+            inst_uie.instance_effect_params = {effect_params_x_uie, effect_params_y_uie, effect_params_z_uie, effect_params_w_uie};
+            if enemy_uie.type == .GRUNT { inst_uie.instance_enemy_type = 0.0; } 
+            else if enemy_uie.type == .SLOWBOY { inst_uie.instance_enemy_type = 1.0; } 
+            else { inst_uie.instance_enemy_type = 0.0; }
             live_enemy_count += 1;
         }
     }
@@ -2139,72 +1813,58 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
 
 frame :: proc "c" () {
     context = runtime.default_context()
-    width := sapp.widthf(); height := sapp.heightf(); aspect := width / height
-    current_time := f32(sapp.frame_count()) / 60.0
-    delta_time := f32(sapp.frame_duration()); delta_time = math.min(delta_time, 1.0/15.0);
+    width_f := sapp.widthf(); height_f := sapp.heightf(); aspect_f := width_f / height_f; // Renamed
+    current_time_f := f32(sapp.frame_count()) / 60.0; // Renamed
+    delta_time_f := f32(sapp.frame_duration()); delta_time_f = math.min(delta_time_f, 1.0/15.0); // Renamed
 
-    // --- Player Update ---
-    state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time);
-    state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time)
-    state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time)
+    state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time_f);
+    state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time_f)
+    state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
 
     if state.player_hp > 0 {
          if state.current_rmb_ammo_charges < MAX_RMB_AMMO_CHARGES {
-            state.rmb_ammo_regen_timer -= delta_time;
+            state.rmb_ammo_regen_timer -= delta_time_f;
             if state.rmb_ammo_regen_timer <= 0.0 {
                 spawn_visual_ammo_charge_particles(state.current_rmb_ammo_charges);
                 state.current_rmb_ammo_charges += 1;
-                state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL; // Reset for next charge
+                state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL; 
                 fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
             }
         }
-        accel_input := m.vec2_zero(); 
-        if state.key_w_down {accel_input.y+=1.0}; if state.key_s_down {accel_input.y-=1.0}; 
-        if state.key_a_down {accel_input.x-=1.0}; if state.key_d_down {accel_input.x+=1.0};  
-        if m.len_sq_vec2(accel_input) > 0.001 {accel_input=m.norm_vec2(accel_input)}; 
-        final_accel := accel_input*PLAYER_ACCELERATION; 
-        if state.key_s_down && !state.key_w_down && accel_input.y < -0.5 { final_accel *= PLAYER_REVERSE_FACTOR };
-        state.player_vel += final_accel*delta_time; 
-        damping_factor := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time); 
-        state.player_vel *= damping_factor; 
+        accel_input_f := m.vec2_zero(); // Renamed
+        if state.key_w_down {accel_input_f.y+=1.0}; if state.key_s_down {accel_input_f.y-=1.0}; 
+        if state.key_a_down {accel_input_f.x-=1.0}; if state.key_d_down {accel_input_f.x+=1.0};  
+        if m.len_sq_vec2(accel_input_f) > 0.001 {accel_input_f=m.norm_vec2(accel_input_f)}; 
+        final_accel_f := accel_input_f*PLAYER_ACCELERATION; // Renamed
+        if state.key_s_down && !state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= PLAYER_REVERSE_FACTOR };
+        state.player_vel += final_accel_f*delta_time_f; 
+        damping_factor_f := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time_f); // Renamed
+        state.player_vel *= damping_factor_f; 
         if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
-        state.player_pos += state.player_vel*delta_time;
+        state.player_pos += state.player_vel*delta_time_f;
 
-        rmb_pressed_this_frame := state.rmb_down && !state.previous_rmb_down; 
-         // --- NEW: Remove visual ammo on RMB press, regardless of actual firing ---
-            if rmb_pressed_this_frame && state.current_rmb_ammo_charges > 0 {
-                // Remove visuals for the charge that WOULD be spent
-                // (state.current_rmb_ammo_charges - 1) is the index of the charge at the "top of the stack"
-                remove_visual_ammo_charge_particles(state.current_rmb_ammo_charges - 1); 
+        rmb_pressed_this_frame_f := state.rmb_down && !state.previous_rmb_down; // Renamed
+        if rmb_pressed_this_frame_f && state.current_rmb_ammo_charges > 0 {
+            remove_visual_ammo_charge_particles(state.current_rmb_ammo_charges - 1); 
+        }
+        if rmb_pressed_this_frame_f && state.rmb_cooldown_timer <= 0.0 { 
+            if state.current_rmb_ammo_charges > 0 {
+                state.current_rmb_ammo_charges -= 1;
+                spawn_swirling_charge(); 
+                fmt.printf("RMB Fired! Ammo Remaining: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
+                if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION; } 
+            } else {
+                fmt.printf("RMB - NO AMMO! (Charges: %d/%d)\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
             }
-            // --- END NEW ---
-
-            if rmb_pressed_this_frame && state.rmb_cooldown_timer <= 0.0 { 
-                if state.current_rmb_ammo_charges > 0 {
-                    // Visuals are already removed above if it was a fresh press
-                    state.current_rmb_ammo_charges -= 1;
-                    spawn_swirling_charge(); 
-                    fmt.printf("RMB Fired! Ammo Remaining: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
-                    if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION; } 
-                } else {
-                    fmt.printf("RMB - NO AMMO! (Charges: %d/%d)\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
-                }
-            }; 
-            state.previous_rmb_down=state.rmb_down;
+        }; 
+        state.previous_rmb_down=state.rmb_down;
 
         if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
             spawn_blackhole_projectile_weapon();
-            // Play click sound
-            seek_result := ma.sound_seek_to_pcm_frame(&state.lmb_sound, 0)
-            if seek_result != .SUCCESS {
-                // Optional: Log warning if seek fails, but proceed to start anyway
-                fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result)
-            }
-            start_result := ma.sound_start(&state.lmb_sound)
-            if start_result != .SUCCESS {
-                // Optional: Log warning if sound start fails
-                fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result)
-            }
+            seek_result_f := ma.sound_seek_to_pcm_frame(&state.lmb_sound, 0) // Renamed
+            if seek_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result_f) }
+            start_result_f := ma.sound_start(&state.lmb_sound) // Renamed
+            if start_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result_f) }
             state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
         }
         state.previous_lmb_down = state.lmb_down;
@@ -2216,77 +1876,62 @@ frame :: proc "c" () {
         }
     }
 
-
-    // --- Player Boundary Logic ---
-    current_ortho_width_for_bounds := ORTHO_HEIGHT * aspect 
-    bounce_min_x : f32 = -current_ortho_width_for_bounds + PLAYER_CORE_WORLD_RADIUS // Adjusted for player radius
-    bounce_max_x : f32 =  current_ortho_width_for_bounds - PLAYER_CORE_WORLD_RADIUS // Adjusted for player radius
-    bounce_min_y : f32 = -ORTHO_HEIGHT + PLAYER_CORE_WORLD_RADIUS                // Adjusted for player radius
-    bounce_max_y : f32 =  ORTHO_HEIGHT - PLAYER_CORE_WORLD_RADIUS                // Adjusted for player radius
-
-    if state.player_pos.x < bounce_min_x { state.player_pos.x = bounce_min_x; if state.player_vel.x < 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
-    else if state.player_pos.x > bounce_max_x { state.player_pos.x = bounce_max_x; if state.player_vel.x > 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
-    if state.player_pos.y < bounce_min_y { state.player_pos.y = bounce_min_y; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
-    else if state.player_pos.y > bounce_max_y { state.player_pos.y = bounce_max_y; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
+    current_ortho_width_for_bounds_f := ORTHO_HEIGHT * aspect_f // Renamed
+    bounce_min_x_f : f32 = -current_ortho_width_for_bounds_f + PLAYER_CORE_WORLD_RADIUS // Renamed
+    bounce_max_x_f : f32 =  current_ortho_width_for_bounds_f - PLAYER_CORE_WORLD_RADIUS // Renamed
+    bounce_min_y_f : f32 = -ORTHO_HEIGHT + PLAYER_CORE_WORLD_RADIUS // Renamed
+    bounce_max_y_f : f32 =  ORTHO_HEIGHT - PLAYER_CORE_WORLD_RADIUS // Renamed
+    if state.player_pos.x < bounce_min_x_f { state.player_pos.x = bounce_min_x_f; if state.player_vel.x < 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
+    else if state.player_pos.x > bounce_max_x_f { state.player_pos.x = bounce_max_x_f; if state.player_vel.x > 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
+    if state.player_pos.y < bounce_min_y_f { state.player_pos.y = bounce_min_y_f; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
+    else if state.player_pos.y > bounce_max_y_f { state.player_pos.y = bounce_max_y_f; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     
-    // --- Enemy Spawning (New Logic) ---
-    // --- Grunt Spawning ---
-    state.grunt_spawn_timer -= delta_time;
+    state.grunt_spawn_timer -= delta_time_f;
     if state.grunt_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
-        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .GRUNT);
+        current_ortho_width_for_spawn_f := ORTHO_HEIGHT * aspect_f; // Renamed
+        spawn_enemy(current_ortho_width_for_spawn_f, ORTHO_HEIGHT, state.player_pos, .GRUNT);
         state.grunt_spawn_timer = 1.0; 
     }
-
-    // --- SlowBoy Spawning ---
-    state.slowboy_spawn_timer -= delta_time;
+    state.slowboy_spawn_timer -= delta_time_f;
     if state.slowboy_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn := ORTHO_HEIGHT * aspect; 
-        spawn_enemy(current_ortho_width_for_spawn, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
+        current_ortho_width_for_spawn_f_sb := ORTHO_HEIGHT * aspect_f; // Renamed
+        spawn_enemy(current_ortho_width_for_spawn_f_sb, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
         state.slowboy_spawn_timer = 5.0; 
     }
 
-    // --- Update Systems ---
-    state.num_active_particles = update_and_instance_particles(delta_time);
-    state.num_active_enemies = update_and_instance_enemies(delta_time); 
-    state.num_active_blackholes = update_and_instance_blackholes(delta_time);
+    state.num_active_particles = update_and_instance_particles(delta_time_f);
+    state.num_active_enemies = update_and_instance_enemies(delta_time_f); 
+    state.num_active_blackholes = update_and_instance_blackholes(delta_time_f);
 
-    // --- Collision Detection ---
     check_LMB_projectile_enemy_collisions();
     check_RMB_particle_enemy_collisions();
-    check_player_enemy_collisions(); // <<< CALL NEW COLLISION FUNCTION
+    check_player_enemy_collisions(); 
 
-    // --- Setup Uniforms & View Projection ---
-    state.bg_fs_params={tick=current_time, resolution={width,height}, bg_option=1}; 
+    state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1}; 
     state.player_fs_params={
-        tick=current_time, 
-        resolution={width,height},
-        player_hp_uniform=f32(state.player_hp), // Pass current HP to shader
-        player_max_hp_uniform=f32(state.player_max_hp),
-        player_invulnerable_timer_uniform = state.player_invulnerable_timer,
+        tick=current_time_f, resolution={width_f,height_f}, player_hp_uniform=f32(state.player_hp), 
+        player_max_hp_uniform=f32(state.player_max_hp), player_invulnerable_timer_uniform = state.player_invulnerable_timer,
         player_invulnerability_duration_uniform = PLAYER_INVULNERABILITY_DURATION,
     }; 
-    state.particle_fs_params={tick=current_time};
-    state.enemy_fs_params={tick=current_time}; 
-    state.blackhole_fs_params={tick=current_time};
+    state.particle_fs_params={tick=current_time_f};
+    state.enemy_fs_params={tick=current_time_f}; 
+    state.blackhole_fs_params={tick=current_time_f};
 
-    ortho_width_vp := ORTHO_HEIGHT*aspect; 
-    proj := m.ortho(-ortho_width_vp,ortho_width_vp,-ORTHO_HEIGHT,ORTHO_HEIGHT,-1.0,1.0); 
-    view := m.identity(); view_proj := m.mul(proj,view); 
+    ortho_width_vp_f := ORTHO_HEIGHT*aspect_f; // Renamed
+    proj_f := m.ortho(-ortho_width_vp_f,ortho_width_vp_f,-ORTHO_HEIGHT,ORTHO_HEIGHT,-1.0,1.0); // Renamed
+    view_f := m.identity(); view_proj_f := m.mul(proj_f,view_f); // Renamed
     
-    scale_mat := m.scale(m.vec3{PLAYER_SCALE,PLAYER_SCALE,1.0}); 
-    translate_mat := m.translate(m.vec3{state.player_pos.x,state.player_pos.y,0.0}); 
-    model := m.mul(translate_mat,scale_mat); 
-    state.player_vs_params.mvp=m.mul(view_proj,model); 
+    scale_mat_f := m.scale(m.vec3{PLAYER_SCALE,PLAYER_SCALE,1.0}); // Renamed
+    translate_mat_f := m.translate(m.vec3{state.player_pos.x,state.player_pos.y,0.0}); // Renamed
+    model_f := m.mul(translate_mat_f,scale_mat_f); // Renamed
+    state.player_vs_params.mvp=m.mul(view_proj_f,model_f); 
     
-    state.particle_vs_params.view_proj=view_proj;
-    state.enemy_vs_params.view_proj=view_proj; 
-    state.blackhole_vs_params.view_proj=view_proj;
+    state.particle_vs_params.view_proj=view_proj_f;
+    state.enemy_vs_params.view_proj=view_proj_f; 
+    state.blackhole_vs_params.view_proj=view_proj_f;
 
 
-    // --- Drawing ---
     sg.begin_pass({action=state.pass_action, swapchain=sglue.swapchain() });
-    
     sg.apply_pipeline(state.bg_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr=&state.bg_fs_params, size=size_of(Bg_Fs_Params)}); sg.draw(0,4,1);
     sg.apply_pipeline(state.player_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr=&state.player_vs_params, size=size_of(Player_Vs_Params)}); sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr=&state.player_fs_params, size=size_of(Player_Fs_Params)}); sg.draw(0,4,1);
 	
@@ -2295,25 +1940,20 @@ frame :: proc "c" () {
 		sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(Particle_Fs_Params)});
 		sg.draw(0, 4, state.num_active_particles);
 	}
-
     if state.num_active_blackholes > 0 {
-        sg.apply_pipeline(state.blackhole_pip); 
-        sg.apply_bindings(state.blackhole_bind); 
+        sg.apply_pipeline(state.blackhole_pip); sg.apply_bindings(state.blackhole_bind); 
         sg.update_buffer(state.blackhole_instance_vbo, sg.Range{ptr=rawptr(&state.blackhole_instance_data[0]), size=uint(state.num_active_blackholes)*size_of(Blackhole_Instance_Data)});
 		sg.apply_uniforms(UB_blackhole_vs_params, sg.Range{ptr=&state.blackhole_vs_params, size=size_of(Blackhole_Vs_Params)}); 
         sg.apply_uniforms(UB_blackhole_fs_params, sg.Range{ptr=&state.blackhole_fs_params, size=size_of(Blackhole_Fs_Params)});
 		sg.draw(0, 4, state.num_active_blackholes);
     }
-
     if state.num_active_enemies > 0 {
-        sg.apply_pipeline(state.enemy_pip)
-        sg.apply_bindings(state.enemy_bind) 
+        sg.apply_pipeline(state.enemy_pip); sg.apply_bindings(state.enemy_bind); 
         sg.update_buffer(state.enemy_instance_vbo, sg.Range{ptr=rawptr(&state.enemy_instance_data[0]), size=uint(state.num_active_enemies)*size_of(Enemy_Instance_Data)})
         sg.apply_uniforms(UB_enemy_vs_params, sg.Range{ptr=&state.enemy_vs_params, size=size_of(Enemy_Vs_Params)}) 
         sg.apply_uniforms(UB_enemy_fs_params, sg.Range{ptr=&state.enemy_fs_params, size=size_of(Enemy_Fs_Params)}) 
         sg.draw(0, 4, state.num_active_enemies)
     }
-
     sg.end_pass(); sg.commit();
 }
 
@@ -2321,60 +1961,35 @@ frame :: proc "c" () {
 cleanup :: proc "c" () { 
     context=runtime.default_context(); 
     
-    // Cleanup Miniaudio sound
-    // Check if the sound was successfully initialized before trying to uninit.
-    // (Assuming state.click_sound.pDataSource is not nil if initialized, or similar check.
-    // For now, we'll call uninit directly. If it crashes, we add checks later.)
-    ma.sound_uninit(&state.lmb_sound) 
-    fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
+    ma.sound_uninit(&state.lmb_sound); fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_sound_audio_buffer); fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
 
-    // Cleanup Miniaudio audio_buffer that holds the click sound's PCM data
-    // This is necessary because ma_audio_buffer_init_copy was used.
-    ma.audio_buffer_uninit(&lmb_sound_audio_buffer) 
-    fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&rmb_hum_audio_buffer); fmt.printf("--- RMB Hum global audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer); fmt.printf("--- RMB Whoosh global audio_buffer uninitialized ---\n")
 
-    // Cleanup global RMB audio_buffers
-    ma.audio_buffer_uninit(&rmb_hum_audio_buffer)
-    fmt.printf("--- RMB Hum global audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer)
-    fmt.printf("--- RMB Whoosh global audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); fmt.printf("--- Enemy Hit audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); fmt.printf("--- Enemy Death audio_buffer uninitialized ---\n")
 
-    // Cleanup enemy sound audio_buffers
-    ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer)
-    fmt.printf("--- Enemy Hit audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer)
-    fmt.printf("--- Enemy Death audio_buffer uninitialized ---\n")
-
-    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer)
-    fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer)
-    fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
-    delete(drum_track_pcm_data);
-    fmt.printf("--- Drum track PCM data slice deleted ---\n");
-    ma.audio_buffer_uninit(&drum_track_audio_buffer);
-    fmt.printf("--- Drum Track audio_buffer uninitialized ---\n");
-
-    ma.sound_uninit(&state.lmb_hit_sound);
-    fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n");
-    ma.sound_uninit(&state.lmb_kill_sound);
-    fmt.printf("--- Miniaudio lmb_kill_sound uninitialized ---\n");
-    ma.sound_uninit(&state.rmb_hit_sound);
-    fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n");
-    ma.sound_uninit(&state.rmb_kill_sound);
-    fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n");
-    ma.sound_uninit(&state.drum_track_sound);
-    fmt.printf("--- Miniaudio drum_track_sound uninitialized ---\n");
-
-    // Cleanup Miniaudio engine
-    ma.engine_uninit(&state.audio_engine)
-    fmt.printf("--- Miniaudio engine uninitialized ---\n")
-
-    // Shutdown Sokol Audio
-    if sa.isvalid() { // Check if Sokol Audio was successfully initialized
-        sa.shutdown()
-        fmt.printf("--- Sokol Audio shutdown ---\n")
-    }
+    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
     
+    delete(drum_track_pcm_data); fmt.printf("--- Drum track PCM data slice deleted ---\n");
+    ma.audio_buffer_uninit(&drum_track_audio_buffer); fmt.printf("--- Drum Track audio_buffer uninitialized ---\n");
+
+    // (<<< NEW SYNTH CLEANUP START >>>)
+    delete(synth_track_pcm_data); fmt.printf("--- Synth track PCM data slice deleted ---\n");
+    ma.audio_buffer_uninit(&synth_track_audio_buffer); fmt.printf("--- Synth Track audio_buffer uninitialized ---\n");
+    // (<<< NEW SYNTH CLEANUP END >>>)
+
+    ma.sound_uninit(&state.lmb_hit_sound); fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n");
+    ma.sound_uninit(&state.lmb_kill_sound); fmt.printf("--- Miniaudio lmb_kill_sound uninitialized ---\n");
+    ma.sound_uninit(&state.rmb_hit_sound); fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n");
+    ma.sound_uninit(&state.rmb_kill_sound); fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n");
+    ma.sound_uninit(&state.drum_track_sound); fmt.printf("--- Miniaudio drum_track_sound uninitialized ---\n");
+    ma.sound_uninit(&state.synth_track_sound); fmt.printf("--- Miniaudio synth_track_sound uninitialized ---\n"); // <<< NEW
+
+    ma.engine_uninit(&state.audio_engine); fmt.printf("--- Miniaudio engine uninitialized ---\n")
+    if sa.isvalid() { sa.shutdown(); fmt.printf("--- Sokol Audio shutdown ---\n") }
     sg.shutdown(); 
 }
-main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Grunt Collision", icon={sokol_default=true}, logger={func=slog.func} }) }
+main :: proc () { sapp.run({ init_cb=init, frame_cb=frame, cleanup_cb=cleanup, event_cb=event, width=800, height=600, sample_count=4, window_title="GeoWars Odin - Synth Track", icon={sokol_default=true}, logger={func=slog.func} }) }
