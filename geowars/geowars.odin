@@ -71,6 +71,21 @@ ENEMY_DEATH_SOUND_SINE_START_FREQ :: 250.0
 ENEMY_DEATH_SOUND_SINE_END_FREQ :: 50.0
 ENEMY_DEATH_SOUND_SINE_AMPLITUDE :: 0.20
 
+// Drum Track Definitions
+DRUM_TRACK_SAMPLE_RATE :: LMB_SOUND_SAMPLE_RATE // Use existing rate
+DRUM_TRACK_CHANNELS :: LMB_SOUND_CHANNELS   // Use existing channels
+DRUM_TRACK_BPM :: 160.0
+DRUM_TRACK_BEATS_PER_BAR :: 4
+DRUM_TRACK_NUM_BARS :: 2 // For a short loop
+DRUM_TRACK_SECONDS_PER_BEAT :: 60.0 / DRUM_TRACK_BPM
+// DRUM_TRACK_FRAMES_PER_BEAT :: int(math.round_f32(DRUM_TRACK_SECONDS_PER_BEAT * f32(DRUM_TRACK_SAMPLE_RATE))) // Will be moved to init
+// DRUM_TRACK_FRAMES_PER_BAR :: DRUM_TRACK_FRAMES_PER_BEAT * DRUM_TRACK_BEATS_PER_BAR // Will be moved to init
+// DRUM_TRACK_TOTAL_FRAMES :: DRUM_TRACK_FRAMES_PER_BAR * DRUM_TRACK_NUM_BARS // Will be moved to init
+DRUM_TRACK_AMPLITUDE :: 0.6 // Master amplitude for the drum track
+
+drum_track_pcm_data: []f32; // Will be allocated in init
+drum_track_audio_buffer: ma.audio_buffer;
+
 // Global PCM data buffers and Miniaudio buffer objects for enemy sounds
 enemy_hit_sound_pcm_data: [ENEMY_HIT_SOUND_FRAMES]f32;
 enemy_death_sound_pcm_data: [ENEMY_DEATH_SOUND_FRAMES]f32;
@@ -319,7 +334,9 @@ state: struct {
     lmb_kill_sound: ma.sound,
     rmb_hit_sound: ma.sound,
     rmb_kill_sound: ma.sound,
+    drum_track_sound: ma.sound,
 
+    first_grunt_killed: bool, 
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, // Player health
     player_invulnerable_timer: f32,    // Invulnerability timer
@@ -360,6 +377,129 @@ init :: proc "c" () {
     context = runtime.default_context()
     sg.setup({ pipeline_pool_size=12, buffer_pool_size=12, shader_pool_size=12, environment=sglue.environment(), logger={func=slog.func} })
     fmt.printf("--- Init Start ---\n")
+
+    // Calculate Drum Track Frame Counts (moved from global consts)
+    // Calculate Drum Track Frame Counts (moved from global consts)
+    DRUM_TRACK_FRAMES_PER_BEAT_F32 := DRUM_TRACK_SECONDS_PER_BEAT * f32(DRUM_TRACK_SAMPLE_RATE);
+    DRUM_TRACK_FRAMES_PER_BEAT := int(math.round_f32(DRUM_TRACK_FRAMES_PER_BEAT_F32));
+    DRUM_TRACK_FRAMES_PER_BAR := DRUM_TRACK_FRAMES_PER_BEAT * DRUM_TRACK_BEATS_PER_BAR;
+    DRUM_TRACK_TOTAL_FRAMES := DRUM_TRACK_FRAMES_PER_BAR * DRUM_TRACK_NUM_BARS;
+    
+    // Allocate the drum_track_pcm_data slice
+    // Ensure drum_track_pcm_data is declared globally as: drum_track_pcm_data: []f32;
+    drum_track_pcm_data = make([]f32, DRUM_TRACK_TOTAL_FRAMES);
+    if drum_track_pcm_data == nil {
+        fmt.eprintf("!!! CRITICAL: Failed to allocate drum_track_pcm_data slice! Total Frames: %d", DRUM_TRACK_TOTAL_FRAMES);
+        return; // Cannot proceed if allocation fails
+    }
+    fmt.printf("--- Drum track PCM data slice allocated. Total Frames: %d ---", DRUM_TRACK_TOTAL_FRAMES);
+
+    // NOTE: Ensure this point is AFTER other sound initializations if drum track constants depend on them,
+    // OR ensure drum track constants like DRUM_TRACK_AMPLITUDE are globally defined :: constants.
+    // The provided snippet assumes DRUM_TRACK_AMPLITUDE is a global :: constant.
+
+    // Generate Revised Placeholder Drum Track PCM Data
+    fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---");
+    
+    // Define simple drum sound characteristics (local constants and variables)
+    KICK_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
+    KICK_START_FREQ :: 120.0; 
+    KICK_END_FREQ :: 40.0;
+    KICK_AMPLITUDE :: 0.9 * DRUM_TRACK_AMPLITUDE;
+
+    SNARE_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 6;
+    SNARE_START_FREQ :: 220.0; 
+    SNARE_AMPLITUDE :: 0.75 * DRUM_TRACK_AMPLITUDE;
+
+    HIHAT_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 16;
+    HIHAT_FREQ :: 6000.0; 
+    HIHAT_AMPLITUDE :: 0.3 * DRUM_TRACK_AMPLITUDE;
+
+    // Zero out the buffer first
+    for i in 0..<DRUM_TRACK_TOTAL_FRAMES { 
+        drum_track_pcm_data[i] = 0.0;
+    }
+
+    // Generate PCM data bar by bar, beat by beat
+    for bar in 0..<DRUM_TRACK_NUM_BARS {
+        for beat_idx in 0..<DRUM_TRACK_BEATS_PER_BAR { // Renamed 'beat' to 'beat_idx'
+            beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + (beat_idx * DRUM_TRACK_FRAMES_PER_BEAT);
+
+            // --- KICK DRUM ---
+            if beat_idx == 0 || beat_idx == 2 {
+                current_phase_kick: f64 = 0.0;
+                for kick_i in 0..<KICK_DURATION_FRAMES {
+                    frame_in_track := beat_start_frame + kick_i;
+                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                    progress: f64 = f64(kick_i) / f64(KICK_DURATION_FRAMES);
+                    amplitude_kick: f64 = math.pow_f64(f64(1.0) - progress, 2.5);
+                    amplitude_kick = math.max(0.0, amplitude_kick);
+                    current_freq_kick: f64 = f64(KICK_START_FREQ) * math.pow_f64(f64(KICK_END_FREQ) / f64(KICK_START_FREQ), progress);
+                    
+                    sample_val_kick: f64 = math.sin(current_phase_kick);
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick * f64(KICK_AMPLITUDE));
+                    
+                    current_phase_kick += (2.0 * f64(math.PI) * current_freq_kick) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    if current_phase_kick >= (2.0 * f64(math.PI)) { current_phase_kick -= (2.0 * f64(math.PI)) }
+                }
+            }
+
+            // --- SNARE DRUM ---
+            if beat_idx == 1 || beat_idx == 3 {
+                current_phase_snare: f64 = 0.0;
+                for snare_i in 0..<SNARE_DURATION_FRAMES {
+                    frame_in_track := beat_start_frame + snare_i;
+                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                    progress: f64 = f64(snare_i) / f64(SNARE_DURATION_FRAMES);
+                    amplitude_snare: f64 = math.pow_f64(f64(1.0) - progress, 3.5); 
+                    amplitude_snare = math.max(0.0, amplitude_snare);
+                    
+                    sample_val_snare: f64 = math.sin(current_phase_snare);
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare * f64(SNARE_AMPLITUDE));
+                    
+                    current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    if current_phase_snare >= (2.0 * f64(math.PI)) { current_phase_snare -= (2.0 * f64(math.PI)) }
+                }
+            }
+
+            // --- HI-HATS ---
+            for eighth_note in 0..<(DRUM_TRACK_BEATS_PER_BAR * 2) { 
+                eighth_note_offset_frames := eighth_note * (DRUM_TRACK_FRAMES_PER_BEAT / 2);
+                hihat_beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + eighth_note_offset_frames;
+                
+                on_main_kick_pos := (eighth_note == 0 || eighth_note == 4);
+                on_main_snare_pos := (eighth_note == 2 || eighth_note == 6);
+
+                if on_main_kick_pos || on_main_snare_pos { 
+                    // Skip
+                } else {
+                    current_phase_hihat: f64 = 0.0;
+                    for hihat_i in 0..<HIHAT_DURATION_FRAMES {
+                        frame_in_track := hihat_beat_start_frame + hihat_i;
+                        if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                        progress: f64 = f64(hihat_i) / f64(HIHAT_DURATION_FRAMES);
+                        amplitude_hihat: f64 = math.pow_f64(f64(1.0) - progress, 2.0); 
+                        amplitude_hihat = math.max(0.0, amplitude_hihat);
+
+                        sample_val_hihat: f64 = math.sin(current_phase_hihat);
+                        drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat * f64(HIHAT_AMPLITUDE));
+
+                        current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                        if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
+                    }
+                }
+            }
+        }
+    }
+    // Simple normalization/clipping pass
+    for i_clamp in 0..<DRUM_TRACK_TOTAL_FRAMES { 
+        drum_track_pcm_data[i_clamp] = math.clamp(drum_track_pcm_data[i_clamp], -0.95, 0.95);
+    }
+
+    fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---");
 
     // Sokol Audio Setup
     sokol_audio_desc := sa.Desc {
@@ -713,6 +853,132 @@ init :: proc "c" () {
             fmt.eprintf("!!! CRITICAL: LMB Kill Explosion audio_buffer_init_copy failed! Error: %v\n", init_lmb_kill_explosion_ab_result)
         }
 
+    // Generate Revised Placeholder Drum Track PCM Data
+    fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---\n")
+    
+    // Define simple drum sound characteristics (as variables, using values calculated earlier in init)
+    KICK_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
+    // KICK_START_FREQ, KICK_END_FREQ, KICK_AMPLITUDE are global constants, no change needed here
+    
+    SNARE_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 6;
+    // SNARE_START_FREQ, SNARE_AMPLITUDE are global constants
+
+    HIHAT_DURATION_FRAMES = DRUM_TRACK_FRAMES_PER_BEAT / 16;
+    // HIHAT_FREQ, HIHAT_AMPLITUDE are global constants
+
+    // Zero out the buffer first, as we are adding to it
+    // Ensure DRUM_TRACK_TOTAL_FRAMES is correctly calculated at the start of init()
+    if len(drum_track_pcm_data) != DRUM_TRACK_TOTAL_FRAMES {
+        fmt.eprintf("!!! ERROR: drum_track_pcm_data slice length (%d) does not match DRUM_TRACK_TOTAL_FRAMES (%d) before zeroing!\n", len(drum_track_pcm_data), DRUM_TRACK_TOTAL_FRAMES)
+        // Handle error or return if critical, though allocation should ensure this.
+    }
+    for i in 0..<DRUM_TRACK_TOTAL_FRAMES { 
+        drum_track_pcm_data[i] = 0.0;
+    }
+
+    // Generate PCM data bar by bar, beat by beat
+    for bar in 0..<DRUM_TRACK_NUM_BARS {
+        for beat in 0..<DRUM_TRACK_BEATS_PER_BAR {
+            beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + (beat * DRUM_TRACK_FRAMES_PER_BEAT);
+
+            // --- KICK DRUM (on beats 1 and 3, i.e., beat index 0 and 2) ---
+            if beat == 0 || beat == 2 {
+                current_phase_kick: f64 = 0.0;
+                for kick_i in 0..<KICK_DURATION_FRAMES {
+                    frame_in_track := beat_start_frame + kick_i;
+                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                    progress: f64 = f64(kick_i) / f64(KICK_DURATION_FRAMES);
+                    amplitude_kick: f64 = math.pow_f64(f64(1.0) - progress, 2.5);
+                    amplitude_kick = math.max(0.0, amplitude_kick); // Ensure non-negative
+                    current_freq_kick: f64 = f64(KICK_START_FREQ) * math.pow_f64(f64(KICK_END_FREQ) / f64(KICK_START_FREQ), progress);
+                    
+                    sample_val_kick: f64 = math.sin(current_phase_kick);
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_kick * amplitude_kick * f64(KICK_AMPLITUDE));
+                    
+                    current_phase_kick += (2.0 * f64(math.PI) * current_freq_kick) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    if current_phase_kick >= (2.0 * f64(math.PI)) { current_phase_kick -= (2.0 * f64(math.PI)) }
+                }
+            }
+
+            // --- SNARE DRUM (on beats 2 and 4, i.e., beat index 1 and 3) ---
+            if beat == 1 || beat == 3 {
+                current_phase_snare: f64 = 0.0;
+                for snare_i in 0..<SNARE_DURATION_FRAMES {
+                    frame_in_track := beat_start_frame + snare_i;
+                    if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                    progress: f64 = f64(snare_i) / f64(SNARE_DURATION_FRAMES);
+                    amplitude_snare: f64 = math.pow_f64(f64(1.0) - progress, 3.5); 
+                    amplitude_snare = math.max(0.0, amplitude_snare);
+                    
+                    sample_val_snare: f64 = math.sin(current_phase_snare);
+                    drum_track_pcm_data[frame_in_track] += f32(sample_val_snare * amplitude_snare * f64(SNARE_AMPLITUDE));
+                    
+                    current_phase_snare += (2.0 * f64(math.PI) * f64(SNARE_START_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                    if current_phase_snare >= (2.0 * f64(math.PI)) { current_phase_snare -= (2.0 * f64(math.PI)) }
+                }
+            }
+
+            // --- HI-HATS (on every 8th note, skipping main kick/snare beats) ---
+            for eighth_note in 0..<(DRUM_TRACK_BEATS_PER_BAR * 2) { 
+                eighth_note_offset_frames := eighth_note * (DRUM_TRACK_FRAMES_PER_BEAT / 2);
+                hihat_beat_start_frame := (bar * DRUM_TRACK_FRAMES_PER_BAR) + eighth_note_offset_frames;
+                
+                on_main_kick_pos := (eighth_note == 0 || eighth_note == 4);
+                on_main_snare_pos := (eighth_note == 2 || eighth_note == 6);
+
+                if on_main_kick_pos || on_main_snare_pos { 
+                    // Skip
+                } else {
+                    current_phase_hihat: f64 = 0.0;
+                    for hihat_i in 0..<HIHAT_DURATION_FRAMES {
+                        frame_in_track := hihat_beat_start_frame + hihat_i;
+                        if frame_in_track >= DRUM_TRACK_TOTAL_FRAMES { break }
+
+                        progress: f64 = f64(hihat_i) / f64(HIHAT_DURATION_FRAMES);
+                        amplitude_hihat: f64 = math.pow_f64(f64(1.0) - progress, 2.0); 
+                        amplitude_hihat = math.max(0.0, amplitude_hihat);
+
+                        sample_val_hihat: f64 = math.sin(current_phase_hihat);
+                        drum_track_pcm_data[frame_in_track] += f32(sample_val_hihat * amplitude_hihat * f64(HIHAT_AMPLITUDE));
+
+                        current_phase_hihat += (2.0 * f64(math.PI) * f64(HIHAT_FREQ)) / f64(DRUM_TRACK_SAMPLE_RATE);
+                        if current_phase_hihat >= (2.0 * f64(math.PI)) { current_phase_hihat -= (2.0 * f64(math.PI)) }
+                    }
+                }
+            }
+        }
+    }
+    // Simple normalization/clipping pass
+    for i in 0..<DRUM_TRACK_TOTAL_FRAMES {
+        drum_track_pcm_data[i] = math.clamp(drum_track_pcm_data[i], -0.95, 0.95);
+    }
+
+    fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---\n")
+
+    // Initialize Miniaudio audio_buffer for the drum track
+    drum_track_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(DRUM_TRACK_CHANNELS), u64(DRUM_TRACK_TOTAL_FRAMES), rawptr(&drum_track_pcm_data[0]), nil)
+    init_drum_track_ab_result := ma.audio_buffer_init_copy(&drum_track_ab_config, &drum_track_audio_buffer)
+    if init_drum_track_ab_result == .SUCCESS {
+        fmt.printf("--- Drum Track audio_buffer initialized. ---\n")
+        // Initialize the persistent drum_track_sound
+        drum_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }; // Or other flags as needed
+        p_drum_track_data_source := (^ma.data_source)(&drum_track_audio_buffer);
+        init_drum_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_drum_track_data_source, drum_track_sound_flags, nil, &state.drum_track_sound);
+        if init_drum_sound_result == .SUCCESS {
+            ma.sound_set_looping(&state.drum_track_sound, true); // Enable looping
+            ma.sound_set_volume(&state.drum_track_sound, DRUM_TRACK_AMPLITUDE); // Set volume
+            fmt.printf("--- Miniaudio drum_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", DRUM_TRACK_AMPLITUDE);
+        } else {
+            fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for drum_track_sound failed! Error: %v\n", init_drum_sound_result);
+            // Cleanup its audio buffer if sound init fails, as it won't be used
+            ma.audio_buffer_uninit(&drum_track_audio_buffer); 
+        }
+    } else {
+        fmt.eprintf("!!! CRITICAL: Drum Track audio_buffer_init_copy failed! Error: %v\n", init_drum_track_ab_result)
+    }
+
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
     state.bind.vertex_buffers[0] = sg.make_buffer({ label="shared-quad-vertices", data=sg.Range{ptr=&vertices[0], size=size_of(vertices)}})
@@ -807,6 +1073,7 @@ init :: proc "c" () {
     state.slowboy_spawn_timer = 5.0; 
 
     // state.enemy_spawn_timer = rand.float32_range(2.0, 3.0) // REMOVED
+    state.first_grunt_killed = false;
     fmt.printf("--- Init Complete ---\n")
 }
 
@@ -1287,6 +1554,15 @@ check_RMB_particle_enemy_collisions :: proc() {
                     // --- ADD PARTICLE SPAWN ---
                     spawn_RMB_enemy_death_particles(enemy.pos); 
                     // --- END ADD ---
+                    if enemy.type == .GRUNT && !state.first_grunt_killed {
+                        state.first_grunt_killed = true;
+                        start_drum_err := ma.sound_start(&state.drum_track_sound);
+                        if start_drum_err == .SUCCESS {
+                            fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");
+                        } else {
+                            fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err);
+                        }
+                    }
                 }
                 // If particle is consumed, break from inner loop (checking this particle against other enemies)
                 break 
@@ -1350,6 +1626,15 @@ check_LMB_projectile_enemy_collisions :: proc() {
                     // --- ADD PARTICLE SPAWN ---
                     spawn_LMB_enemy_death_particles(enemy.pos, enemy.color); 
                     // --- END ADD ---
+                    if enemy.type == .GRUNT && !state.first_grunt_killed {
+                        state.first_grunt_killed = true;
+                        start_drum_err := ma.sound_start(&state.drum_track_sound);
+                        if start_drum_err == .SUCCESS {
+                            fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");
+                        } else {
+                            fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err);
+                        }
+                    }
                 }
                 break 
             }
@@ -2064,6 +2349,10 @@ cleanup :: proc "c" () {
     fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
     ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer)
     fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
+    delete(drum_track_pcm_data);
+    fmt.printf("--- Drum track PCM data slice deleted ---\n");
+    ma.audio_buffer_uninit(&drum_track_audio_buffer);
+    fmt.printf("--- Drum Track audio_buffer uninitialized ---\n");
 
     ma.sound_uninit(&state.lmb_hit_sound);
     fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n");
@@ -2073,6 +2362,8 @@ cleanup :: proc "c" () {
     fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n");
     ma.sound_uninit(&state.rmb_kill_sound);
     fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n");
+    ma.sound_uninit(&state.drum_track_sound);
+    fmt.printf("--- Miniaudio drum_track_sound uninitialized ---\n");
 
     // Cleanup Miniaudio engine
     ma.engine_uninit(&state.audio_engine)
