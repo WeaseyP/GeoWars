@@ -200,7 +200,7 @@ ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0
 ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 
 
 // Enemy Death Particle Constants
-LMB_ENEMY_DEATH_PARTICLE_COUNT :: 60
+LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
 LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
 LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
@@ -209,11 +209,8 @@ LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025
 LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
 LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
 
-// Enemy Hit Particle Constants
-ENEMY_HIT_PARTICLE_COUNT :: 20
-
 // RMB Enemy Death Particle Constants
-RMB_ENEMY_DEATH_PARTICLE_COUNT :: 60 
+RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
 RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
 RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
@@ -292,6 +289,60 @@ Blackhole_Instance_Data :: struct #align(16) {
     },
 }
 
+// --- Level and Stage System Structs ---
+
+EnemySpawnConfig :: struct {
+    enemy_type: EnemyType,
+    count: int,
+    min_spawn_delay: f32, // Minimum time in seconds before the next enemy of this type spawns
+    max_spawn_delay: f32, // Maximum time in seconds before the next enemy of this type spawns
+}
+
+StageDefinition :: struct {
+    enemy_configs: []EnemySpawnConfig, // Use a dynamic array for flexibility
+    // duration: f32, // Optional: could be used for time-based stages
+    // trigger_condition: string, // Optional: for more complex stage end conditions
+}
+
+LevelDefinition :: struct {
+    stages: []StageDefinition, // Use a dynamic array
+    boss_config: EnemySpawnConfig, // A single config for the boss of this level
+    // Or boss_stage_index: int, if a boss is just a special stage
+}
+
+// --- Structs for Tracking Active Stage Progress ---
+
+// State for a single enemy type within an active stage
+ActiveStageEnemySpawnState :: struct {
+    config_index: int,      // Index into the StageDefinition.enemy_configs
+    spawn_timer: f32,       // Current timer counting down to next spawn
+    spawned_count: int,     // How many of this enemy type have been spawned for this config
+    remaining_to_spawn: int, // How many are left to spawn for this config based on its count
+}
+
+// Holds all active enemy spawn states for the current stage
+ActiveStageState :: struct {
+    enemy_spawn_states: [dynamic]ActiveStageEnemySpawnState, // Dynamic array of states
+    all_enemies_for_stage_spawned: bool, // True if all enemies defined in enemy_configs have been spawned
+}
+
+GameProgression :: struct {
+    current_level_index: int,
+    current_stage_index: int,
+    
+    active_stage: ActiveStageState,
+    
+    total_enemies_defined_for_current_stage: int, // Total enemies from all configs in the current stage definition
+    enemies_defeated_in_current_stage: int,
+    
+    // Potentially, a pointer to the current LevelDefinition and StageDefinition
+    // current_level_def: ^LevelDefinition, // For easier access, manage lifetime carefully
+    // current_stage_def: ^StageDefinition, // For easier access, manage lifetime carefully
+}
+
+game_levels: []LevelDefinition; // Global variable for level definitions
+// rng_state_progression: rand.Rand; // Renamed
+random_generator_progression: runtime.Default_Random_State; // This is our seeded RNG state for progression
 
 Enemy :: struct {
     pos: m.vec2,
@@ -337,6 +388,7 @@ Enemy_Instance_Data :: struct #align(16) {
 
 // --- Global State ---
 state: struct {
+    progression: GameProgression,
     pass_action: sg.Pass_Action, bind: sg.Bindings,
     bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline,
     bg_fs_params: Bg_Fs_Params, player_vs_params: Player_Vs_Params, player_fs_params: Player_Fs_Params,
@@ -389,6 +441,59 @@ state: struct {
 // =============================================================================
 // END: Package-Level Declarations
 // =============================================================================
+
+load_and_initialize_stage_progression :: proc(level_idx: int, stage_idx: int) {
+    context = runtime.default_context();
+    fmt.printf("--- Attempting to load Stage: Level %d, Stage %d ---\n", level_idx, stage_idx);
+
+    if level_idx >= len(game_levels) {
+        fmt.printf("!!! ERROR: Level index %d is out of bounds (game_levels length: %d).\n", level_idx, len(game_levels));
+        // Optionally, handle this as game won or error state
+        // For now, just prevent further progression logic for this call
+        state.progression.active_stage.all_enemies_for_stage_spawned = true; // Stop spawning
+        return;
+    }
+    current_level_def := &game_levels[level_idx];
+
+    if stage_idx >= len(current_level_def.stages) {
+        fmt.printf("!!! ERROR: Stage index %d is out of bounds for Level %d (stages length: %d).\n", stage_idx, level_idx, len(current_level_def.stages));
+        // This might mean the current level is complete, and we should try to advance to the next level.
+        // Handled by the calling logic in frame()
+        state.progression.active_stage.all_enemies_for_stage_spawned = true; // Stop spawning
+        return;
+    }
+    current_stage_def := &current_level_def.stages[stage_idx];
+
+    state.progression.current_level_index = level_idx;
+    state.progression.current_stage_index = stage_idx;
+    state.progression.enemies_defeated_in_current_stage = 0;
+    
+    clear(&state.progression.active_stage.enemy_spawn_states); // Clear previous states
+    
+    total_enemies_count_for_stage: int = 0;
+    if len(current_stage_def.enemy_configs) > 0 {
+        // Reserve if desired, but append will grow it: reserve(&state.progression.active_stage.enemy_spawn_states, len(current_stage_def.enemy_configs));
+        for config, config_idx in current_stage_def.enemy_configs {
+            spawn_state := ActiveStageEnemySpawnState {
+                config_index       = config_idx,
+                spawn_timer        = rand.float32_range(config.min_spawn_delay, config.max_spawn_delay, runtime.default_random_generator(&random_generator_progression)),
+                spawned_count      = 0,
+                remaining_to_spawn = config.count,
+            };
+            append(&state.progression.active_stage.enemy_spawn_states, spawn_state);
+            total_enemies_count_for_stage += config.count;
+        }
+    }
+    
+    state.progression.total_enemies_defined_for_current_stage = total_enemies_count_for_stage;
+    state.progression.active_stage.all_enemies_for_stage_spawned = (len(current_stage_def.enemy_configs) == 0);
+    
+    fmt.printf("Loaded Stage: Level %d, Stage %d. Total Enemies: %d. Spawn states: %d. All spawned initially: %t\n", 
+        level_idx, stage_idx, 
+        state.progression.total_enemies_defined_for_current_stage,
+        len(state.progression.active_stage.enemy_spawn_states),
+        state.progression.active_stage.all_enemies_for_stage_spawned);
+}
 
 
 init :: proc "c" () {
@@ -1007,6 +1112,89 @@ init :: proc "c" () {
 
     state.first_grunt_killed = false;
     state.first_slowboy_killed = false; // <<< NEW
+
+    // --- Initialize Level Definitions ---
+    fmt.printf("--- Initializing Level Definitions ---\n");
+    game_levels = make([]LevelDefinition, 1);
+
+    // --- Level 1 Definition ---
+    game_levels[0] = LevelDefinition{
+        // Define boss_config first, as the boss stage will refer to it.
+        boss_config = EnemySpawnConfig {
+            enemy_type = .SLOWBOY,
+            count = 1,
+            min_spawn_delay = 1.0, // Boss usually has a fixed or minimal delay once triggered
+            max_spawn_delay = 1.0,
+        },
+        // Initialize stages slice for 2 regular stages + 1 boss stage
+        stages = make([]StageDefinition, 3), 
+    };
+
+    // --- Level 1, Stage 1 ---
+    game_levels[0].stages[0] = StageDefinition{
+        enemy_configs = make([]EnemySpawnConfig, 1),
+    };
+    game_levels[0].stages[0].enemy_configs[0] = EnemySpawnConfig {
+        enemy_type = .GRUNT,
+        count = 20,
+        min_spawn_delay = 0.5,
+        max_spawn_delay = 0.8,
+    };
+
+    // --- Level 1, Stage 2 ---
+    game_levels[0].stages[1] = StageDefinition{
+        enemy_configs = make([]EnemySpawnConfig, 2), // Two types of enemies in this stage
+    };
+    game_levels[0].stages[1].enemy_configs[0] = EnemySpawnConfig {
+        enemy_type = .GRUNT,
+        count = 30,
+        min_spawn_delay = 0.8,
+        max_spawn_delay = 2.0,
+    };
+    game_levels[0].stages[1].enemy_configs[1] = EnemySpawnConfig {
+        enemy_type = .SLOWBOY,
+        count = 10,
+        min_spawn_delay = 2.0,
+        max_spawn_delay = 4.0,
+    };
+
+    // --- Level 1, Stage 3 (Boss Stage) ---
+    // This stage uses the boss_config defined in the LevelDefinition.
+    game_levels[0].stages[2] = StageDefinition{
+        enemy_configs = make([]EnemySpawnConfig, 1),
+    };
+    // Assign the boss configuration to the enemy config of the boss stage.
+    // This creates a copy of the boss_config for this stage.
+    game_levels[0].stages[2].enemy_configs[0] = game_levels[0].boss_config; 
+    game_levels[0].stages[2].enemy_configs[0] = EnemySpawnConfig {
+        enemy_type = .GRUNT,
+        count = 30,
+        min_spawn_delay = 0.8,
+        max_spawn_delay = 2.0,
+    };
+
+
+    fmt.printf("--- Level Definitions Initialized: %d levels ---\n", len(game_levels));
+    if len(game_levels) > 0 {
+        fmt.printf("    Level 0 Stages: %d\n", len(game_levels[0].stages));
+        if len(game_levels[0].stages) > 0 {
+             fmt.printf("        Stage 0 Enemy Configs: %d\n", len(game_levels[0].stages[0].enemy_configs));
+             fmt.printf("        Stage 1 Enemy Configs: %d\n", len(game_levels[0].stages[1].enemy_configs));
+             fmt.printf("        Stage 2 (Boss) Enemy Configs: %d\n", len(game_levels[0].stages[2].enemy_configs));
+        }
+    }
+    // --- End Level Definitions Initialization ---
+
+    // --- Initialize Game Progression State ---
+    // Initialize global RNG state for progression system
+    random_generator_progression_seed: u64 = 12345; 
+    random_generator_progression = rand.create(random_generator_progression_seed); // Initialize the global state variable
+    fmt.printf("Initialized progression RNG (random_generator_progression) with seed: %d\n", random_generator_progression_seed);
+    // Any previous initialization of a global rand.Generator variable with this name has been removed by the global declaration changes.
+    
+    load_and_initialize_stage_progression(0, 0); // Load Level 0, Stage 0
+    // --- End Game Progression State Initialization ---
+
     fmt.printf("--- Init Complete ---\n")
 }
 
@@ -1100,30 +1288,6 @@ spawn_swirling_charge :: proc() {
             size=start_size_val, start_size=start_size_val, life_remaining=charge_duration, life_max=charge_duration,
             swirl_duration=charge_duration, rotation=rand.float32()*f32(m.TAU), angular_vel=start_angular_vel,
             charge_center_pos=charge_spawn_center, is_burst_particle=false, is_swirling_charge=true, is_ammo_indicator=false, active=false, 
-		})
-	}
-}
-
-spawn_enemy_hit_particles :: proc(pos: m.vec2, enemy_color: m.vec4) {
-	context = runtime.default_context()
-	for _ in 0..<ENEMY_HIT_PARTICLE_COUNT {
-		particle_dir_angle := rand.float32() * m.TAU 
-		particle_dir := m.angle_to_vec2(particle_dir_angle) 
-		particle_speed := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE * 0.75 + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND * 0.75 // Slightly slower than death
-		particle_life := (LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND) * 0.6 // Shorter life
-		particle_size := (LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND) * 0.7 // Slightly smaller
-		particle_angular_vel := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX 
-		
-		particle_hit_color := enemy_color; 
-		particle_hit_color.r = math.min(enemy_color.r * 1.2 + 0.2, 1.0);
-		particle_hit_color.g = math.min(enemy_color.g * 1.2 + 0.2, 1.0);
-		particle_hit_color.b = math.min(enemy_color.b * 1.2 + 0.2, 1.0);
-		particle_hit_color.a = rand.float32_range(0.6, 0.85); 
-		
-		emit_particle(Particle{
-			pos=pos, vel=particle_dir*particle_speed, cloud_travel_vel={0,0}, color=particle_hit_color, size=particle_size, start_size=particle_size,
-            life_remaining=particle_life, life_max=particle_life, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=particle_angular_vel,
-            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
 		})
 	}
 }
@@ -1301,9 +1465,9 @@ remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
     }
 }
 
-spawn_RMB_enemy_death_particles :: proc(pos: m.vec2, enemy_color: m.vec4) {
+spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
 	context = runtime.default_context()
-	// base_death_color_rmb := RMB_PARTICLE_COLOR; // Removed
+	base_death_color_rmb := RMB_PARTICLE_COLOR; // Renamed
 	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
 		angle_rmb_d := rand.float32() * m.TAU // Renamed
 		dir_rmb_d := m.angle_to_vec2(angle_rmb_d) // Renamed
@@ -1311,11 +1475,11 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2, enemy_color: m.vec4) {
 		life_rmb_d := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
 		size_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
 		angular_vel_rmb_d := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
-		particle_color_rmb_d := enemy_color; // Use the passed-in enemy_color
-		particle_color_rmb_d.r = math.min(enemy_color.r * 1.2 + 0.2, 1.0);
-		particle_color_rmb_d.g = math.min(enemy_color.g * 1.2 + 0.2, 1.0);
-		particle_color_rmb_d.b = math.min(enemy_color.b * 1.2 + 0.2, 1.0);
-		particle_color_rmb_d.a = rand.float32_range(0.7, 0.95); // Consistent with LMB
+		particle_color_rmb_d := base_death_color_rmb; // Renamed
+		particle_color_rmb_d.r = math.clamp(base_death_color_rmb.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
+		particle_color_rmb_d.g = math.clamp(base_death_color_rmb.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
+		particle_color_rmb_d.b = math.clamp(base_death_color_rmb.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
+		particle_color_rmb_d.a = rand.float32_range(0.6, 0.9); 
 		emit_particle(Particle{
 			pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
             life_remaining=life_rmb_d, life_max=life_rmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_rmb_d,
@@ -1347,10 +1511,6 @@ check_RMB_particle_enemy_collisions :: proc() {
 
             if dist_sq_rmb_coll < radii_sum_sq_rmb_coll {
                 enemy_rmb_coll.hp -= PARTICLE_DAMAGE_VALUE 
-                
-                if enemy_rmb_coll.hp > 0 {
-                    spawn_enemy_hit_particles(enemy_rmb_coll.pos, enemy_rmb_coll.color);
-                }
                 fmt.printf("RMB Hit: Enemy %p, HP before sound check: %d\n", enemy_rmb_coll, enemy_rmb_coll.hp);
                 
                 if enemy_rmb_coll.hp <= 0 {
@@ -1374,6 +1534,8 @@ check_RMB_particle_enemy_collisions :: proc() {
 
                 if enemy_rmb_coll.hp <= 0 && !enemy_rmb_coll.is_dying { 
                     enemy_rmb_coll.is_dying = true;
+                    state.progression.enemies_defeated_in_current_stage += 1;
+                    fmt.printf("RMB Kill: Enemy defeated. Stage progress: %d/%d\n", state.progression.enemies_defeated_in_current_stage, state.progression.total_enemies_defined_for_current_stage);
                     if enemy_rmb_coll.type == .GRUNT {
                         enemy_rmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
                         enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
@@ -1385,7 +1547,7 @@ check_RMB_particle_enemy_collisions :: proc() {
                         enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
                     enemy_rmb_coll.death_rect_offset = 0.0;
-                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos, enemy_rmb_coll.color); 
+                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos); 
                     if enemy_rmb_coll.type == .GRUNT && !state.first_grunt_killed {
                         state.first_grunt_killed = true;
                         start_drum_err_rmb := ma.sound_start(&state.drum_track_sound); // Renamed
@@ -1428,10 +1590,6 @@ check_LMB_projectile_enemy_collisions :: proc() {
             if dist_sq_lmb_coll < radii_sum_sq_lmb_coll {
                 proj_lmb_coll.active = false    
                 enemy_lmb_coll.hp -= LMB_PROJECTILE_DAMAGE; 
-
-                if enemy_lmb_coll.hp > 0 {
-                    spawn_enemy_hit_particles(enemy_lmb_coll.pos, enemy_lmb_coll.color);
-                }
                 fmt.printf("LMB Hit: Enemy %p, HP before sound check: %d\n", enemy_lmb_coll, enemy_lmb_coll.hp);
                 if enemy_lmb_coll.hp <= 0 {
                     if !enemy_lmb_coll.is_dying {
@@ -1447,6 +1605,8 @@ check_LMB_projectile_enemy_collisions :: proc() {
 
                 if enemy_lmb_coll.hp <= 0 && !enemy_lmb_coll.is_dying { 
                     enemy_lmb_coll.is_dying = true;
+                    state.progression.enemies_defeated_in_current_stage += 1;
+                    fmt.printf("LMB Kill: Enemy defeated. Stage progress: %d/%d\n", state.progression.enemies_defeated_in_current_stage, state.progression.total_enemies_defined_for_current_stage);
                     if enemy_lmb_coll.type == .GRUNT {
                         enemy_lmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
                         enemy_lmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
@@ -1852,6 +2012,8 @@ frame :: proc "c" () {
     current_time_f := f32(sapp.frame_count()) / 60.0; // Renamed
     delta_time_f := f32(sapp.frame_duration()); delta_time_f = math.min(delta_time_f, 1.0/15.0); // Renamed
 
+    current_ortho_width_for_bounds_f := ORTHO_HEIGHT * aspect_f; 
+
     state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time_f);
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time_f)
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
@@ -1911,28 +2073,100 @@ frame :: proc "c" () {
         }
     }
 
-    current_ortho_width_for_bounds_f := ORTHO_HEIGHT * aspect_f // Renamed
-    bounce_min_x_f : f32 = -current_ortho_width_for_bounds_f + PLAYER_CORE_WORLD_RADIUS // Renamed
-    bounce_max_x_f : f32 =  current_ortho_width_for_bounds_f - PLAYER_CORE_WORLD_RADIUS // Renamed
-    bounce_min_y_f : f32 = -ORTHO_HEIGHT + PLAYER_CORE_WORLD_RADIUS // Renamed
-    bounce_max_y_f : f32 =  ORTHO_HEIGHT - PLAYER_CORE_WORLD_RADIUS // Renamed
+    // Define bounce boundary variables using the calculated orthographic width
+    bounce_min_x_f : f32 = -current_ortho_width_for_bounds_f + PLAYER_CORE_WORLD_RADIUS;
+    bounce_max_x_f : f32 =  current_ortho_width_for_bounds_f - PLAYER_CORE_WORLD_RADIUS;
+    bounce_min_y_f : f32 = -ORTHO_HEIGHT + PLAYER_CORE_WORLD_RADIUS;
+    bounce_max_y_f : f32 =  ORTHO_HEIGHT - PLAYER_CORE_WORLD_RADIUS;
+
     if state.player_pos.x < bounce_min_x_f { state.player_pos.x = bounce_min_x_f; if state.player_vel.x < 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.x > bounce_max_x_f { state.player_pos.x = bounce_max_x_f; if state.player_vel.x > 0 { state.player_vel.x *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     if state.player_pos.y < bounce_min_y_f { state.player_pos.y = bounce_min_y_f; if state.player_vel.y < 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }} 
     else if state.player_pos.y > bounce_max_y_f { state.player_pos.y = bounce_max_y_f; if state.player_vel.y > 0 { state.player_vel.y *= -PLAYER_BOUNCE_DAMPING_FACTOR }}
     
-    state.grunt_spawn_timer -= delta_time_f;
-    if state.grunt_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn_f := ORTHO_HEIGHT * aspect_f; // Renamed
-        spawn_enemy(current_ortho_width_for_spawn_f, ORTHO_HEIGHT, state.player_pos, .GRUNT);
-        state.grunt_spawn_timer = 1.0; 
+    // --- Old Spawning Logic (Commented Out) ---
+    // state.grunt_spawn_timer -= delta_time_f;
+    // if state.grunt_spawn_timer <= 0.0 {
+    //     current_ortho_width_for_spawn_f := ORTHO_HEIGHT * aspect_f; 
+    //     spawn_enemy(current_ortho_width_for_spawn_f, ORTHO_HEIGHT, state.player_pos, .GRUNT);
+    //     state.grunt_spawn_timer = 1.0; 
+    // }
+    // state.slowboy_spawn_timer -= delta_time_f;
+    // if state.slowboy_spawn_timer <= 0.0 {
+    //     current_ortho_width_for_spawn_f_sb := ORTHO_HEIGHT * aspect_f; 
+    //     spawn_enemy(current_ortho_width_for_spawn_f_sb, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
+    //     state.slowboy_spawn_timer = 5.0; 
+    // }
+
+    // --- New Stage-Based Enemy Spawning ---
+    if !state.progression.active_stage.all_enemies_for_stage_spawned && state.player_hp > 0 { // Only spawn if player is alive
+        current_level_def: ^LevelDefinition;
+        current_stage_def: ^StageDefinition;
+        
+        // Safely get current level and stage definitions
+        if state.progression.current_level_index < len(game_levels) {
+            current_level_def = &game_levels[state.progression.current_level_index];
+            if state.progression.current_stage_index < len(current_level_def.stages) {
+                current_stage_def = &current_level_def.stages[state.progression.current_stage_index];
+
+                all_configs_done_spawning_this_frame := true; // Assume all are done until proven otherwise
+
+                for &spawn_state, idx in &state.progression.active_stage.enemy_spawn_states { // Made spawn_state mutable
+                    if spawn_state.remaining_to_spawn == 0 {
+                        continue; // All enemies for this specific config are spawned
+                    }
+                    
+                    all_configs_done_spawning_this_frame = false; // At least one config still has enemies to spawn
+
+                    spawn_state.spawn_timer -= delta_time_f;
+
+                    if spawn_state.spawn_timer <= 0.0 {
+                        // Ensure config_index is valid for current_stage_def.enemy_configs
+                        if spawn_state.config_index < len(current_stage_def.enemy_configs) {
+                            config := &current_stage_def.enemy_configs[spawn_state.config_index];
+
+                            // Get screen dimensions for spawning (similar to old logic)
+                            // aspect_f is already available from top of frame()
+                            current_ortho_width_for_spawn_f := ORTHO_HEIGHT * aspect_f;
+    
+                            spawn_enemy(current_ortho_width_for_spawn_f, ORTHO_HEIGHT, state.player_pos, config.enemy_type);
+                            
+                            spawn_state.remaining_to_spawn -= 1;
+                            spawn_state.spawned_count += 1;
+                            
+                            // Reset timer only if there are more to spawn for this config
+                            if spawn_state.remaining_to_spawn > 0 {
+                                // Use the global state variable random_generator_progression to get a generator
+                                spawn_state.spawn_timer = rand.float32_range(config.min_spawn_delay, config.max_spawn_delay, runtime.default_random_generator(&random_generator_progression));
+                            } else {
+                                spawn_state.spawn_timer = 0; // Or some other indicator it's done
+                            }
+                        } else {
+                            // This case should ideally not happen if initialized correctly
+                            fmt.printf("ERROR: spawn_state.config_index out of bounds!\n");
+                        }
+                    }
+                }
+                
+                // Update all_enemies_for_stage_spawned if all individual configs are done
+                if all_configs_done_spawning_this_frame {
+                     state.progression.active_stage.all_enemies_for_stage_spawned = true;
+                     fmt.printf("All enemies for Stage %d Level %d have been spawned.\n", state.progression.current_stage_index, state.progression.current_level_index);
+                }
+
+            } else {
+                // Current stage index is out of bounds for the current level
+                // This might indicate end of level, or an error. Stage advancement logic will handle this.
+                // For now, ensure we don't try to spawn.
+                state.progression.active_stage.all_enemies_for_stage_spawned = true;
+            }
+        } else {
+            // Current level index is out of bounds (game complete or error)
+            // For now, ensure we don't try to spawn.
+            state.progression.active_stage.all_enemies_for_stage_spawned = true;
+        }
     }
-    state.slowboy_spawn_timer -= delta_time_f;
-    if state.slowboy_spawn_timer <= 0.0 {
-        current_ortho_width_for_spawn_f_sb := ORTHO_HEIGHT * aspect_f; // Renamed
-        spawn_enemy(current_ortho_width_for_spawn_f_sb, ORTHO_HEIGHT, state.player_pos, .SLOWBOY);
-        state.slowboy_spawn_timer = 5.0; 
-    }
+    // --- End of New Stage-Based Enemy Spawning ---
 
     state.num_active_particles = update_and_instance_particles(delta_time_f);
     state.num_active_enemies = update_and_instance_enemies(delta_time_f); 
@@ -1941,6 +2175,57 @@ frame :: proc "c" () {
     check_LMB_projectile_enemy_collisions();
     check_RMB_particle_enemy_collisions();
     check_player_enemy_collisions(); 
+
+    // --- Stage Advancement Logic ---
+    if state.progression.active_stage.all_enemies_for_stage_spawned &&
+       state.progression.enemies_defeated_in_current_stage >= state.progression.total_enemies_defined_for_current_stage &&
+       state.player_hp > 0 { // Check player_hp to prevent advancement if player died on last enemy
+
+        // Stage Complete!
+        fmt.printf("Stage %d (Level %d) COMPLETED. Defeated %d / %d enemies.\n", 
+                   state.progression.current_stage_index, state.progression.current_level_index, 
+                   state.progression.enemies_defeated_in_current_stage, state.progression.total_enemies_defined_for_current_stage);
+
+        current_level_idx_before_advancement := state.progression.current_level_index;
+        next_stage_to_load := state.progression.current_stage_index + 1;
+        next_level_to_load := state.progression.current_level_index;
+        
+        game_is_now_won := false;
+
+        // Check if this was the last stage of the current level
+        if current_level_idx_before_advancement < len(game_levels) {
+            current_level_def := &game_levels[current_level_idx_before_advancement];
+            if next_stage_to_load >= len(current_level_def.stages) {
+                // Current level completed, advance to next level
+                fmt.printf("Level %d COMPLETED.\n", current_level_idx_before_advancement);
+                next_level_to_load = current_level_idx_before_advancement + 1;
+                next_stage_to_load = 0; // Reset to first stage of new level
+
+                if next_level_to_load >= len(game_levels) {
+                    // All defined levels are completed
+                    game_is_now_won = true;
+                }
+            }
+        } else {
+            // This case should ideally not be reached if logic is sound, implies current_level_index was already out of bounds.
+            fmt.printf("ERROR: current_level_index (%d) was already out of bounds of game_levels (%d).\n", current_level_idx_before_advancement, len(game_levels));
+            game_is_now_won = true; // Treat as game won/ended to prevent further errors
+        }
+
+        if game_is_now_won {
+            fmt.printf("--- ALL LEVELS COMPLETED! GAME WON! ---\n");
+            // Optional: Add a game state flag like state.game_is_won = true and check this flag
+            // at the beginning of the frame or in input handling to stop player actions/game updates.
+            // For now, we effectively stop progression by not calling load_and_initialize_stage_progression.
+            // To make it explicit:
+            // state.progression.game_completed = true; // Assuming you add such a field
+        } else {
+            // Load the new stage (or first stage of the new level)
+            fmt.printf("Advancing to Level %d, Stage %d.\n", next_level_to_load, next_stage_to_load);
+            load_and_initialize_stage_progression(next_level_to_load, next_stage_to_load);
+        }
+    }
+    // --- End Stage Advancement Logic ---
 
     state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1}; 
     state.player_fs_params={

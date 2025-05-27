@@ -1,0 +1,30 @@
+RMB Hit: Enemy 0x7FF6A1345030, HP before sound check: 3
+RMB Hit branch: Playing hit sound for enemy 0x7FF6A1345030. HP: 3
+RMB Hit: Enemy 0x7FF6A1344838, HP before sound check: 9
+RMB Hit branch: Playing hit sound for enemy 0x7FF6A1344838. HP: 9
+RMB Hit: Enemy 0x7FF6A13450B8, HP before sound check: 0
+RMB Kill branch: Playing death sound for enemy 0x7FF6A13450B8. is_dying: false
+RMB Hit: Enemy 0x7FF6A13452D8, HP before sound check: 3
+RMB Hit branch: Playing hit sound for enemy 0x7FF6A13452D8. HP: 3
+RMB Hit: Enemy 0x7FF6A1345030, HP before sound check: 2
+RMB Hit branch: Playing hit sound for enemy 0x7FF6A1345030. HP: 2
+--- Miniaudio lmb_sound uninitialized ---
+--- Miniaudio lmb_sound_audio_buffer uninitialized ---
+--- RMB Hum global audio_buffer uninitialized ---
+--- RMB Whoosh global audio_buffer uninitialized ---
+--- Enemy Hit audio_buffer uninitialized ---
+--- Enemy Death audio_buffer uninitialized ---
+--- LMB Hit Whoosh audio_buffer uninitialized ---
+--- LMB Kill Explosion audio_buffer uninitialized ---
+--- Drum track PCM data slice deleted ---
+--- Drum Track audio_buffer uninitialized ---
+--- Synth track PCM data slice deleted ---
+--- Synth Track audio_buffer uninitialized ---
+--- Miniaudio lmb_hit_sound uninitialized ---
+--- Miniaudio lmb_kill_sound uninitialized ---
+--- Miniaudio rmb_hit_sound uninitialized ---
+--- Miniaudio rmb_kill_sound uninitialized ---
+--- Miniaudio drum_track_sound uninitialized ---
+--- Miniaudio synth_track_sound uninitialized ---
+--- Miniaudio engine uninitialized ---
+--- Sokol Audio shutdown ---
