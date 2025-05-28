@@ -447,6 +447,7 @@ out vec2 enemy_uv_out_fs;
 out vec4 enemy_effect_params_fs; 
 out float enemy_visual_scale_fs_out;
 out float v_enemy_type_fs; // <<< NEW: To pass enemy type to fragment shader
+out float v_enemy_main_rotation_fs;
 
 // main() now takes NO parameters
 void main() {
@@ -469,6 +470,7 @@ void main() {
     enemy_effect_params_fs = instance_effect_params_vs_in;
     enemy_visual_scale_fs_out = instance_visual_scale_vs_in; 
     v_enemy_type_fs = instance_enemy_type_vs_in; // <<< Use the new attribute
+    v_enemy_main_rotation_fs = instance_main_rotation_vs_in;
 }
 @end
 @fs fs_enemy
@@ -479,6 +481,7 @@ in vec2 enemy_uv_out_fs;
 in vec4 enemy_effect_params_fs; // .x=is_dying, .y=death_rect_offset, .z=part_scale_mult/glow_canvas_sf, .w=overall_dying_alpha
 in float enemy_visual_scale_fs_out;  // Current overall WORLD size of the enemy (name changed)
 in float v_enemy_type_fs; // <<< NEW: Received enemy type from VS
+in float v_enemy_main_rotation_fs;
 
 out vec4 frag_color;
 
@@ -518,8 +521,40 @@ void main() {
     vec2 uv_centered = enemy_uv_out_fs - vec2(0.5);
     const float enemy_visual_scale_on_quad = 3.0;
 
+    // --- BOSS_CHROME_ORB Rendering Path ---
+    if (v_enemy_type_fs > 1.5 && v_enemy_type_fs < 2.5) { // BOSS_CHROME_ORB (type 2.0)
+        float sphere_radius = 0.45; // UV space radius
+        float dist_to_center = length(uv_centered * enemy_visual_scale_on_quad);
+        float sphere_sdf = dist_to_center - sphere_radius;
+        float sphere_aa = 0.02;
+        float sphere_alpha = smoothstep(sphere_aa, 0.0, sphere_sdf);
+
+        vec3 base_orb_color = vec3(0.75, 0.75, 0.8); // Light metallic grey
+        vec3 highlight_color = vec3(1.0, 1.0, 1.0);
+        float highlight_pos = 0.3; // Offset for highlight
+        float highlight_intensity = smoothstep(0.0, 0.8, max(0.0, uv_centered.x + highlight_pos)); // Simple directional highlight
+        vec3 orb_color = mix(base_orb_color, highlight_color, highlight_intensity * 0.5);
+
+        float circle_orbit_radius = sphere_radius * 0.6;
+        vec2 black_circle_center_offset = vec2(cos(v_enemy_main_rotation_fs), sin(v_enemy_main_rotation_fs)) * circle_orbit_radius;
+        float black_circle_radius = 0.1;
+        float black_circle_sdf = length( (uv_centered * enemy_visual_scale_on_quad) - black_circle_center_offset ) - black_circle_radius;
+        float black_circle_aa = 0.015;
+        float black_circle_alpha = smoothstep(black_circle_aa, 0.0, black_circle_sdf);
+
+        vec3 final_boss_color = mix(orb_color, vec3(0.0, 0.0, 0.0), black_circle_alpha); // Black circle on top
+        float combined_alpha = sphere_alpha; // Base alpha from sphere
+
+        float is_dying = enemy_effect_params_fs.x;
+        float overall_dying_alpha_multiplier = enemy_effect_params_fs.w;
+        if (is_dying > 0.5) { combined_alpha *= overall_dying_alpha_multiplier; }
+
+        frag_color = vec4(final_boss_color, combined_alpha * enemy_color_out_fs.a);
+        if (frag_color.a < 0.01) { discard; }
+        return; // End of BOSS_CHROME_ORB path
+    } // <<< CORRECTED: Added missing closing brace here
     // --- SlowBoy Rendering Path ---
-    if (v_enemy_type_fs > 0.5) { // Assuming 1.0 for SlowBoy
+    else if (v_enemy_type_fs > 0.5) { // Assuming 1.0 for SlowBoy
         float glow_canvas_scale_factor = enemy_effect_params_fs.z; 
 
         float star_base_render_radius = 0.45; 
@@ -585,9 +620,10 @@ void main() {
     }
 
     // --- Grunt Rendering Path (existing logic) ---
-    float aa_sdf_space; // Defined locally for Grunt
-    float is_dying = enemy_effect_params_fs.x;
-    float death_offset_world_units = enemy_effect_params_fs.y;
+    else { // Assuming Grunt is type 0.0 or any other not explicitly handled
+        float aa_sdf_space; // Defined locally for Grunt
+        float is_dying = enemy_effect_params_fs.x;
+        float death_offset_world_units = enemy_effect_params_fs.y;
     float current_part_scale_multiplier = enemy_effect_params_fs.z;
     float overall_dying_alpha_multiplier = enemy_effect_params_fs.w;
 
@@ -681,6 +717,7 @@ void main() {
     if (frag_color.a < 0.01) {
         discard;
     }
+}
 }
 @end
 @program enemy vs_enemy fs_enemy

@@ -176,6 +176,14 @@ ENEMY_SLOWBOY_MAX_HP :: 16
 // --- SlowBoy Attack Constants ---
 SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; 
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
+// --- Boss Chrome Orb Constants ---
+ENEMY_BOSS_CHROME_ORB_SCALE :: ENEMY_GRUNT_SCALE * 2.5;
+ENEMY_BOSS_CHROME_ORB_MAX_HP :: 100;
+ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL :: m.PI / 2.0; // Radians per second for black circle rotation
+ENEMY_BOSS_HORIZONTAL_SPEED :: 1.0; // World units per second
+ENEMY_BOSS_SPAWN_Y_OFFSET :: ORTHO_HEIGHT * 0.75; // Spawn near the top of the screen
+ENEMY_BOSS_SCREEN_PADDING :: 0.2; // Padding from screen edges
+
 SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 
 SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; 
 SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; 
@@ -235,6 +243,7 @@ vertex_stride :: size_of(f32) * 7
 EnemyType :: enum {
     GRUNT,
     SLOWBOY,
+    BOSS_CHROME_ORB,
 }
 
 particle_quad_stride :: size_of(f32) * 4
@@ -363,6 +372,7 @@ Enemy :: struct {
     dying_timer: f32,
     death_rect_offset: f32,
     death_anim_max_duration: f32,
+    boss_move_direction: f32, // New field for boss horizontal movement
 
     // --- SlowBoy Attack State ---
     is_winding_up_attack: bool,
@@ -1121,7 +1131,7 @@ init :: proc "c" () {
     game_levels[0] = LevelDefinition{
         // Define boss_config first, as the boss stage will refer to it.
         boss_config = EnemySpawnConfig {
-            enemy_type = .SLOWBOY,
+            enemy_type = .BOSS_CHROME_ORB,
             count = 1,
             min_spawn_delay = 1.0, // Boss usually has a fixed or minimal delay once triggered
             max_spawn_delay = 1.0,
@@ -1166,13 +1176,7 @@ init :: proc "c" () {
     // Assign the boss configuration to the enemy config of the boss stage.
     // This creates a copy of the boss_config for this stage.
     game_levels[0].stages[2].enemy_configs[0] = game_levels[0].boss_config; 
-    game_levels[0].stages[2].enemy_configs[0] = EnemySpawnConfig {
-        enemy_type = .GRUNT,
-        count = 30,
-        min_spawn_delay = 0.8,
-        max_spawn_delay = 2.0,
-    };
-
+    // Make sure the line above is not overwritten by a Grunt or Slowboy configuration for stage 2.
 
     fmt.printf("--- Level Definitions Initialized: %d levels ---\n", len(game_levels));
     if len(game_levels) > 0 {
@@ -1656,6 +1660,7 @@ check_player_enemy_collisions :: proc() {
         radii_sum_pe_coll := player_radius_pe_coll + enemy_radius_pe_coll // Renamed
         radii_sum_sq_pe_coll := radii_sum_pe_coll * radii_sum_pe_coll // Renamed
         if dist_sq_pe_coll < radii_sum_sq_pe_coll {
+            if enemy_pe_coll.hp <= 0 { continue } // Don't process if enemy is already dead
             state.player_hp -= ENEMY_GRUNT_DAMAGE_VALUE // Assuming grunt damage for now
             state.player_hp = math.max(state.player_hp, 0) 
             state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION
@@ -1770,6 +1775,13 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
     initial_wander_vector_en := m.angle_to_vec2(initial_wander_angle_en) // Renamed
 
     enemy_to_spawn: Enemy
+    // Specific handling for BOSS_CHROME_ORB spawn position
+    if type_to_spawn == .BOSS_CHROME_ORB {
+        // For boss, we don't use the random border spawning loop.
+        // Its position is determined specifically.
+        valid_spawn_found_en = true; 
+    }
+
     if type_to_spawn == .GRUNT {
         base_grunt_rgb_en := m.vec3{0.9, 0.1, 0.7} // Renamed
         grunt_color_en := m.vec4{base_grunt_rgb_en.r, base_grunt_rgb_en.g, base_grunt_rgb_en.b, ENEMY_BASE_ALPHA} // Renamed
@@ -1800,6 +1812,26 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             is_winding_up_attack = false, attack_windup_timer = 0.0,
             has_locked_attack_trajectory = false, attack_charge_target_pos = {0,0},
             is_charging_attack = false, attack_charge_start_pos = {0,0},
+        }
+    } else if type_to_spawn == .BOSS_CHROME_ORB {
+        start_pos_en.x = 0.0; // Spawn in horizontal center
+        start_pos_en.y = ENEMY_BOSS_SPAWN_Y_OFFSET; // Spawn at top
+
+        boss_color_en := m.vec4{0.75, 0.75, 0.8, ENEMY_BASE_ALPHA};
+        enemy_to_spawn = Enemy {
+            pos = start_pos_en, 
+            vel = {ENEMY_BOSS_HORIZONTAL_SPEED, 0.0}, // Initial velocity
+            color = boss_color_en, 
+            target_size = ENEMY_BOSS_CHROME_ORB_SCALE, current_size = ENEMY_BOSS_CHROME_ORB_SCALE * ENEMY_INITIAL_SCALE_FACTOR,
+            grow_timer = ENEMY_GROW_DURATION, is_growing = true,
+            rotation = rand.float32() * m.TAU, // Main body rotation, can be static
+            angular_vel = 0.0,                 // Main body angular velocity
+            hp = ENEMY_BOSS_CHROME_ORB_MAX_HP, type = .BOSS_CHROME_ORB, active = false,
+            current_wander_vector = initial_wander_vector_en, 
+            wander_timer = rand.float32_range(0.0, ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL),
+            is_dying = false, dying_timer = 0.0, death_rect_offset = 0.0,
+            death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION, 
+            boss_move_direction = 1.0, // Start by moving right
         }
     } else {
         fmt.printf("spawn_enemy: WARNING - Unknown type_to_spawn: %v\n", type_to_spawn);
@@ -1900,7 +1932,11 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 normalized_strict_direction_growing_uie := m.norm_vec2(direction_to_player_strict_growing_uie); // Renamed
                 final_direction_growing_uie = normalized_strict_direction_growing_uie + (enemy_uie.current_wander_vector * ENEMY_WANDER_INFLUENCE);
             }
-            current_speed_growing_uie : f32 = enemy_uie.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_SLOWBOY_SPEED; // Renamed
+            current_speed_growing_uie : f32;
+            if enemy_uie.type == .GRUNT { current_speed_growing_uie = ENEMY_GRUNT_SPEED; }
+            else if enemy_uie.type == .SLOWBOY { current_speed_growing_uie = ENEMY_SLOWBOY_SPEED; }
+            else { current_speed_growing_uie = 0.0; } // BOSS_CHROME_ORB starts stationary during growth
+
             if dist_sq_to_player_growing_uie > 0.00001 {
                 normalized_final_direction_growing_uie := m.norm_vec2(final_direction_growing_uie); // Renamed
                 enemy_uie.vel = normalized_final_direction_growing_uie * current_speed_growing_uie;
@@ -1910,14 +1946,45 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         } else { 
             enemy_uie.current_size = enemy_uie.target_size;
             current_visual_scale_for_shader_uie = enemy_uie.current_size; 
-            enemy_uie.rotation += enemy_uie.angular_vel * dt;
+            // NOTE: enemy_uie.rotation for BOSS_CHROME_ORB is handled below
+            if (enemy_uie.type != .BOSS_CHROME_ORB) { // General rotation for non-bosses
+                 enemy_uie.rotation += enemy_uie.angular_vel * dt;
+            }
             effect_params_x_uie = 0.0;
             effect_params_y_uie = 0.0;
             effect_params_w_uie = 1.0;
             if enemy_uie.type == .SLOWBOY { effect_params_z_uie = ENEMY_SLOWBOY_GLOW_CANVAS_SF; } 
-            else { effect_params_z_uie = 1.0; }
-            
-            if enemy_uie.type == .SLOWBOY {
+            else { effect_params_z_uie = 1.0; } // Default for GRUNT and BOSS
+
+            if enemy_uie.type == .BOSS_CHROME_ORB && !enemy_uie.is_dying {
+                enemy_uie.rotation += ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL * dt; // This controls black circle
+                
+                // Horizontal movement logic for BOSS_CHROME_ORB
+                aspect_ratio_uie := sapp.widthf() / sapp.heightf();
+                current_ortho_width_uie := ORTHO_HEIGHT * aspect_ratio_uie;
+                boss_half_width_uie := enemy_uie.current_size * 0.5;
+                left_bound_uie := -current_ortho_width_uie + boss_half_width_uie + ENEMY_BOSS_SCREEN_PADDING;
+                right_bound_uie := current_ortho_width_uie - boss_half_width_uie - ENEMY_BOSS_SCREEN_PADDING;
+
+                enemy_uie.vel.y = 0; // Ensure no vertical movement
+
+                if enemy_uie.pos.x >= right_bound_uie && enemy_uie.vel.x > 0 {
+                    enemy_uie.pos.x = right_bound_uie; // Clamp position
+                    enemy_uie.vel.x = -ENEMY_BOSS_HORIZONTAL_SPEED;
+                    enemy_uie.boss_move_direction = -1.0;
+                } else if enemy_uie.pos.x <= left_bound_uie && enemy_uie.vel.x < 0 {
+                    enemy_uie.pos.x = left_bound_uie; // Clamp position
+                    enemy_uie.vel.x = ENEMY_BOSS_HORIZONTAL_SPEED;
+                    enemy_uie.boss_move_direction = 1.0;
+                }
+                // If vel.x is somehow zero, re-initialize based on boss_move_direction
+                // This could happen if it was manually set to {0,0} after growing and before this logic.
+                // The spawn sets an initial velocity, so this is a fallback.
+                if enemy_uie.vel.x == 0 {
+                     enemy_uie.vel.x = ENEMY_BOSS_HORIZONTAL_SPEED * enemy_uie.boss_move_direction;
+                }
+
+            } else if enemy_uie.type == .SLOWBOY {
                 player_dist_sq_uie := m.dist_sq_vec2(enemy_uie.pos, player_pos_uie); // Renamed
                 if enemy_uie.is_charging_attack {
                     has_updated_pos_for_charge_bounce_uie = true; 
@@ -1999,7 +2066,8 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             inst_uie.instance_effect_params = {effect_params_x_uie, effect_params_y_uie, effect_params_z_uie, effect_params_w_uie};
             if enemy_uie.type == .GRUNT { inst_uie.instance_enemy_type = 0.0; } 
             else if enemy_uie.type == .SLOWBOY { inst_uie.instance_enemy_type = 1.0; } 
-            else { inst_uie.instance_enemy_type = 0.0; }
+            else if enemy_uie.type == .BOSS_CHROME_ORB { inst_uie.instance_enemy_type = 2.0; }
+            else { inst_uie.instance_enemy_type = 0.0; } // Default
             live_enemy_count += 1;
         }
     }
