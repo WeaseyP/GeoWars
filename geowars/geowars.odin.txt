@@ -177,7 +177,7 @@ ENEMY_SLOWBOY_MAX_HP :: 16
 SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; 
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
 // --- Boss Chrome Orb Constants ---
-ENEMY_BOSS_CHROME_ORB_SCALE :: ENEMY_GRUNT_SCALE; // This is the 'current_size' in Odin for the boss entity
+ENEMY_BOSS_CHROME_ORB_SCALE :: ENEMY_GRUNT_SCALE * 2.5; // This is the 'current_size' in Odin for the boss entity
 ENEMY_BOSS_CHROME_ORB_MAX_HP :: 100;
 ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL :: m.PI / 2.0; // Radians per second for black circle rotation (not used for main body)
 ENEMY_BOSS_HORIZONTAL_SPEED :: 1.0; // World units per second
@@ -189,11 +189,10 @@ ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0; // Seconds between detection pr
 ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4; // Vision rectangle width - passed to shader
 
 // NEW Laser Specifics (can be same as vision rect or different)
-BOSS_LASER_LENGTH :: ORTHO_HEIGHT * 15.0;       // Length of the damaging laser beam
+BOSS_LASER_LENGTH :: ENEMY_BOSS_VISION_RANGE * 100;       // Length of the damaging laser beam
 BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5; // Make laser visually thinner than detection rect
 BOSS_LASER_DAMAGE :: 1;                             // Damage dealt by laser on contact (per collision check)
-ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier for regular enemies
-BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT * 15.0; // NEW: e.g., 4x screen height, should be plenty
+
 
 
 SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 
@@ -220,6 +219,7 @@ ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 
 // ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // This was for an old grunt death anim, might not be needed/used the same way
 
+ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier applied to enemy.current_size before sending to shader's instance_visual_scale
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
@@ -1991,7 +1991,8 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             }
             
             enemy_uie.current_size = f32(m.lerp(enemy_uie.target_size, enemy_uie.target_size * ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR, progress_raw_uie)); // Use raw progress for size lerp
-            } else if enemy_uie.type == .SLOWBOY && enemy_uie.is_winding_up_attack {
+        
+        } else if enemy_uie.type == .SLOWBOY && enemy_uie.is_winding_up_attack {
             effect_params_x_uie = 0.0; 
             effect_params_y_uie = 1.0; 
             effect_params_z_uie = enemy_uie.attack_windup_timer; 
@@ -2191,16 +2192,8 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             inst_uie := &state.enemy_instance_data[live_enemy_count]; 
             inst_uie.instance_pos = enemy_uie.pos;
             inst_uie.instance_main_rotation = enemy_uie.rotation; // For Grunt/Slowbody rotation, Boss aiming
-            if enemy_uie.type == .BOSS_CHROME_ORB {
-                // For the boss, use the large quad diameter directly.
-                // The shader's p_scaled_uv space (where SDFs are defined) is fixed at -1.5 to 1.5.
-                // The actual visual size of the boss orb within this giant quad is determined by SDF radii in the shader.
-                inst_uie.instance_visual_scale = BOSS_QUAD_WORLD_DIAMETER;
-            } else {
-                // For other enemies, their visual scale is their current_size (world units)
-                // multiplied by a shader-specific multiplier.
-                inst_uie.instance_visual_scale = enemy_uie.current_size * ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER; 
-            }            inst_uie.instance_color = enemy_uie.color;
+            inst_uie.instance_visual_scale = enemy_uie.current_size * ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER; 
+            inst_uie.instance_color = enemy_uie.color;
             inst_uie.instance_effect_params = {effect_params_x_uie, effect_params_y_uie, effect_params_z_uie, effect_params_w_uie};
             
             if enemy_uie.type == .GRUNT { inst_uie.instance_enemy_type = 0.0; } 

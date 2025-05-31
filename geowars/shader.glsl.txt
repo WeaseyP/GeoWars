@@ -560,12 +560,18 @@ void main() {
             // 1 unit in p_scaled_uv = ( (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad) / 2.0 ) / 1.5 world units.
             // = ( (current_size*3.0 / 3.0) / 2.0 ) / 1.5 = (current_size / 2.0) / 1.5 = current_size / 3.0 world units.
             // So, 1 world unit = 3.0 / current_size in p_scaled_uv units.
-            float world_to_p_scaled_uv_factor;
-            if (enemy_visual_scale_fs_out > 0.001) { // Check if enemy_visual_scale_fs_out is not zero
-                 world_to_p_scaled_uv_factor = enemy_visual_scale_on_quad / enemy_visual_scale_fs_out;
+            // float world_to_p_scaled_uv_factor = enemy_visual_scale_on_quad / (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad);
+            // float world_to_p_scaled_uv_factor = 3.0 / ( (current_size * 3.0) / 3.0 ) = 3.0 / current_size. This looks right.
+            float world_to_p_scaled_uv_factor = enemy_visual_scale_on_quad / (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad);
+
+
+            if ( (enemy_visual_scale_fs_out/enemy_visual_scale_on_quad) > 0.001) { // Effectively if current_size > 0.001
+                 world_to_p_scaled_uv_factor = enemy_visual_scale_on_quad / (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad) ;
             } else {
-                 world_to_p_scaled_uv_factor = 1.0; // Avoid division by zero, assign a fallback
+                 world_to_p_scaled_uv_factor = 1.0; // Avoid division by zero, though unlikely
             }
+
+
             float rect_width_p_scaled_uv = vision_rect_width_world * world_to_p_scaled_uv_factor; 
             float rect_length_p_scaled_uv = vision_rect_length_world * world_to_p_scaled_uv_factor * 100;
 
@@ -688,8 +694,8 @@ void main() {
         
         // aa_world is desired AA edge in world units. Convert to p_scaled_uv units.
         float aa_p_scaled_uv = world_size_of_one_p_scaled_uv_unit / world_units_per_p_scaled_uv_unit;
-        aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.01; 
-       // aa_sdf_space = max(aa_sdf_space, aa_p_scaled_uv); // Ensure aa isn't too small
+        aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.1; 
+        aa_sdf_space = max(aa_sdf_space, aa_p_scaled_uv); // Ensure aa isn't too small
 
 
         float death_offset_p_scaled_uv = 0.0;
