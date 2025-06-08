@@ -177,7 +177,7 @@ ENEMY_SLOWBOY_MAX_HP :: 16
 SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; 
 SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
 // --- Boss Chrome Orb Constants ---
-ENEMY_BOSS_CHROME_ORB_SCALE :: ENEMY_GRUNT_SCALE; // This is the 'current_size' in Odin for the boss entity
+ENEMY_BOSS_CHROME_ORB_SCALE :: 0.2; // This is the 'current_size' in Odin for the boss entity
 ENEMY_BOSS_CHROME_ORB_MAX_HP :: 100;
 ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL :: m.PI / 2.0; // Radians per second for black circle rotation (not used for main body)
 ENEMY_BOSS_HORIZONTAL_SPEED :: 1.0; // World units per second
@@ -189,11 +189,11 @@ ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0; // Seconds between detection pr
 ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4; // Vision rectangle width - passed to shader
 
 // NEW Laser Specifics (can be same as vision rect or different)
-BOSS_LASER_LENGTH :: ORTHO_HEIGHT * 15.0;       // Length of the damaging laser beam
+BOSS_LASER_LENGTH :: ORTHO_HEIGHT;       // Length of the damaging laser beam
 BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5; // Make laser visually thinner than detection rect
 BOSS_LASER_DAMAGE :: 1;                             // Damage dealt by laser on contact (per collision check)
 ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier for regular enemies
-BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT * 15.0; // NEW: e.g., 4x screen height, should be plenty
+BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT; // NEW: e.g., 4x screen height, should be plenty
 
 
 SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 
@@ -1161,7 +1161,7 @@ init :: proc "c" () {
     };
     game_levels[0].stages[0].enemy_configs[0] = EnemySpawnConfig {
         enemy_type = .GRUNT,
-        count = 3, // Test with a few grunts
+        count = 1, // Test with a few grunts
         min_spawn_delay = 0.5,
         max_spawn_delay = 0.8,
     };
@@ -1172,13 +1172,13 @@ init :: proc "c" () {
     };
     game_levels[0].stages[1].enemy_configs[0] = EnemySpawnConfig {
         enemy_type = .GRUNT,
-        count = 5, // More grunts
+        count = 1, // More grunts
         min_spawn_delay = 0.8,
         max_spawn_delay = 2.0,
     };
     game_levels[0].stages[1].enemy_configs[1] = EnemySpawnConfig {
         enemy_type = .SLOWBOY,
-        count = 2, // A couple of slowboys
+        count = 1, // A couple of slowboys
         min_spawn_delay = 2.0,
         max_spawn_delay = 4.0,
     };
@@ -2069,10 +2069,11 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             } else { // BOSS_CHROME_ORB specific logic during growth (aim, but don't move via wander/seek yet)
                  dir_to_player_boss_rot_uie := player_pos_uie - enemy_uie.pos;
                 if m.len_sq_vec2(dir_to_player_boss_rot_uie) > 0.0001 {
-                    enemy_uie.rotation = math.atan2(dir_to_player_boss_rot_uie.y, dir_to_player_boss_rot_uie.x);
+                    enemy_uie.rotation = -m.PI / 2.0; // Aim straight down
                 }
                 enemy_uie.vel = {0,0}; 
             }
+
         } else { // Not dying, Not growing, (and for SlowBoy: not winding up attack)
             enemy_uie.current_size = enemy_uie.target_size;
             
@@ -2085,7 +2086,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 
                 dir_to_player_boss_rot_uie := player_pos_uie - enemy_uie.pos; 
                 if m.len_sq_vec2(dir_to_player_boss_rot_uie) > 0.0001 { 
-                    enemy_uie.rotation = math.atan2(dir_to_player_boss_rot_uie.y, dir_to_player_boss_rot_uie.x);
+                    enemy_uie.rotation = -m.PI / 2.0; // Aim straight down
                 } 
                 
                 if enemy_uie.boss_detection_print_cooldown > 0 {
