@@ -109,7 +109,10 @@ layout(binding=1) uniform Player_Fs_Params {
     float player_hp_uniform;
     float player_max_hp_uniform;
     float player_invulnerable_timer_uniform;
-    float player_invulnerability_duration_uniform; 
+    float player_invulnerability_duration_uniform;
+    vec2 dash_trail_positions;
+    float dash_trail_count_uniform;
+    float is_dashing_uniform;
 };
 in vec2 v_uv;
 out vec4 frag_color;

@@ -124,6 +124,11 @@ PLAYER_ACCELERATION      :: 15.0
 PLAYER_REVERSE_FACTOR    :: 0.5
 PLAYER_DAMPING           :: 2.5
 PLAYER_MAX_SPEED         :: 7.0
+PLAYER_DASH_SPEED_MULT   :: 1.5  // Multiplier for max speed during dash
+PLAYER_DASH_DURATION     :: 0.15  // Duration of the dash in seconds
+PLAYER_DASH_COOLDOWN     :: 3.0  // Cooldown time in seconds
+PLAYER_DASH_TRAIL_LENGTH      :: 4; // Number of after-images
+PLAYER_DASH_TRAIL_SPAWN_RATE  :: 0.035; // Time in seconds between spawning each trail point
 PLAYER_SCALE             :: 0.15
 PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
 PLAYER_CORE_SHADER_RADIUS :: 0.04
@@ -146,7 +151,7 @@ SWIRL_SPEED_ORBITAL_BASE    : f32 : 3.5
 SWIRL_SPEED_INWARD_INITIAL  : f32 : -0.1 
 SWIRL_PARTICLE_SIZE_BASE    : f32 : 0.03 
 SWIRL_PARTICLE_SIZE_RAND    : f32 : 0.01
-SWIRL_CLOUD_TRAVEL_FACTOR   : f32 : 0.0  
+SWIRL_CLOUD_TRAVEL_FACTOR   : f32 : 0.0 
 SWIRL_CLOUD_BASE_PUSH       : f32 : 0.15 
 
 
@@ -218,8 +223,6 @@ SLOWBOY_DEATH_ANIM_DURATION :: 1.0
 BOSS_DEATH_ANIM_DURATION :: 4.0 // Longer for boss
 ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 
 ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 
-// ENEMY_DEATH_QUAD_RENDER_SCALE_MULTIPLIER :: 2.5 // This was for an old grunt death anim, might not be needed/used the same way
-
 
 // Enemy Death Particle Constants
 LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
@@ -437,10 +440,15 @@ state: struct {
     player_invulnerable_timer: f32,    
     player_defeated_message_shown: bool, 
 
-    key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool,
+    key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool, key_shift_down: bool,
     
     rmb_down: bool, previous_rmb_down: bool, rmb_cooldown_timer: f32,
     lmb_down: bool, previous_lmb_down: bool, lmb_cooldown_timer: f32,
+    is_dashing: bool, dash_timer: f32, dash_cooldown_timer: f32,
+
+    player_dash_traiL_pos: [PLAYER_DASH_TRAIL_LENGTH]m.vec2, 
+    player_dash_trail_count: int, 
+    dash_trail_spawn_timer: f32,
 
     current_rmb_ammo_charges: int,
     rmb_ammo_regen_timer: f32,
@@ -1125,6 +1133,13 @@ init :: proc "c" () {
     state.player_invulnerable_timer = 0.0;
     state.player_defeated_message_shown = false;
 
+    state.key_shift_down = false;
+    state.is_dashing = false;
+    state.dash_timer = 0.0;
+    state.dash_cooldown_timer = 0.0;
+    state.player_dash_trail_count = 0;
+    state.dash_trail_spawn_timer = 0.0;
+
     state.rmb_down=false; state.previous_rmb_down=false; state.rmb_cooldown_timer=0.0;
     state.lmb_down=false; state.previous_lmb_down=false; state.lmb_cooldown_timer=0.0;
     state.mouse_screen_pos = {0,0};
@@ -1218,8 +1233,21 @@ init :: proc "c" () {
 event :: proc "c" (event: ^sapp.Event) {
     context = runtime.default_context()
     #partial switch event.type {
-    case .KEY_DOWN: #partial switch event.key_code { case .W: state.key_w_down=true; case .S: state.key_s_down=true; case .A: state.key_a_down=true; case .D: state.key_d_down=true; case .ESCAPE: sapp.request_quit(); }
-    case .KEY_UP: #partial switch event.key_code { case .W: state.key_w_down=false; case .S: state.key_s_down=false; case .A: state.key_a_down=false; case .D: state.key_d_down=false; }
+    case .KEY_DOWN: #partial switch event.key_code { 
+        case .W: state.key_w_down=true; 
+        case .S: state.key_s_down=true; 
+        case .A: state.key_a_down=true; 
+        case .D: state.key_d_down=true; 
+        case .LEFT_SHIFT: state.key_shift_down = true; // <<< NEW
+        case .ESCAPE: sapp.request_quit(); 
+    }
+    case .KEY_UP: #partial switch event.key_code { 
+        case .W: state.key_w_down=false; 
+        case .S: state.key_s_down=false; 
+        case .A: state.key_a_down=false; 
+        case .D: state.key_d_down=false; 
+        case .LEFT_SHIFT: state.key_shift_down = false; // <<< NEW
+    }
     case .MOUSE_DOWN: 
         if event.mouse_button == .RIGHT { state.rmb_down = true }
         if event.mouse_button == .LEFT  { state.lmb_down = true }
@@ -2219,15 +2247,33 @@ frame :: proc "c" () {
     context = runtime.default_context()
     width_f := sapp.widthf(); height_f := sapp.heightf(); aspect_f := width_f / height_f; // Renamed
     current_time_f := f32(sapp.frame_count()) / 60.0; // Renamed
-    delta_time_f := f32(sapp.frame_duration()); delta_time_f = math.min(delta_time_f, 1.0/15.0); // Renamed
+    delta_time_f := f32(sapp.frame_duration()); delta_time_f = math.min(delta_time_f, 1.0/15.0); 
 
     current_ortho_width_for_bounds_f := ORTHO_HEIGHT * aspect_f; 
 
     state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time_f);
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time_f)
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
+    state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);         // <<< NEW
+    state.dash_cooldown_timer = math.max(0.0, state.dash_cooldown_timer - delta_time_f); // <<< NEW
 
     if state.player_hp > 0 {
+        
+        if state.dash_timer <= 0.0 && state.is_dashing {
+            state.is_dashing = false;
+        }
+
+        if state.key_shift_down && !state.is_dashing && state.dash_cooldown_timer <= 0.0 {
+            state.is_dashing = true;
+            state.dash_timer = PLAYER_DASH_DURATION;
+            state.dash_cooldown_timer = PLAYER_DASH_COOLDOWN;
+            state.player_invulnerable_timer = math.max(state.player_invulnerable_timer, PLAYER_DASH_DURATION);
+            state.player_dash_trail_count = 0; // Reset on new dash
+            state.dash_trail_spawn_timer = 0.0;
+            fmt.printf("Player DASH!\n");
+        }
+
+
          if state.current_rmb_ammo_charges < MAX_RMB_AMMO_CHARGES {
             state.rmb_ammo_regen_timer -= delta_time_f;
             if state.rmb_ammo_regen_timer <= 0.0 {
@@ -2237,19 +2283,54 @@ frame :: proc "c" () {
                 fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
             }
         }
-        accel_input_f := m.vec2_zero(); // Renamed
+        accel_input_f := m.vec2_zero(); 
         if state.key_w_down {accel_input_f.y+=1.0}; if state.key_s_down {accel_input_f.y-=1.0}; 
         if state.key_a_down {accel_input_f.x-=1.0}; if state.key_d_down {accel_input_f.x+=1.0};  
         if m.len_sq_vec2(accel_input_f) > 0.001 {accel_input_f=m.norm_vec2(accel_input_f)}; 
-        final_accel_f := accel_input_f*PLAYER_ACCELERATION; // Renamed
-        if state.key_s_down && !state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= PLAYER_REVERSE_FACTOR };
-        state.player_vel += final_accel_f*delta_time_f; 
-        damping_factor_f := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time_f); // Renamed
-        state.player_vel *= damping_factor_f; 
-        if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
+        if state.is_dashing {
+            if state.dash_timer <= 0.0 {
+                state.is_dashing = false;
+                state.player_dash_trail_count = 0; // Clear trails when dash ends
+            } else {
+                // Spawn trail points periodically during the dash
+                state.dash_trail_spawn_timer -= delta_time_f;
+                if state.dash_trail_spawn_timer <= 0.0 {
+                    state.dash_trail_spawn_timer = PLAYER_DASH_TRAIL_SPAWN_RATE;
+
+                    // Shift existing trail positions
+                    for i in reverse(1..<PLAYER_DASH_TRAIL_LENGTH) {
+                        state.player_dash_trail_pos[i] = state.player_dash_trail_pos[i-1];
+                    }
+                    // Add new position at the front
+                    state.player_dash_trail_pos[0] = state.player_pos;
+                    
+                    // Increment count, but don't exceed max length
+                    if state.player_dash_trail_count < PLAYER_DASH_TRAIL_LENGTH {
+                        state.player_dash_trail_count += 1;
+                    }
+                }
+            }
+            dash_direction := accel_input_f;
+            if m.len_sq_vec2(dash_direction) < 0.1 && m.len_sq_vec2(state.player_vel) > 0.1 {
+                dash_direction = m.norm_vec2(state.player_vel);
+            } else if m.len_sq_vec2(dash_direction) < 0.1 {
+                dash_direction = {0, 1}; // Default dash forward if stationary with no input
+            }
+            state.player_vel = dash_direction * PLAYER_MAX_SPEED * PLAYER_DASH_SPEED_MULT;
+        } else {
+            // Normal movement logic
+            final_accel_f := accel_input_f*PLAYER_ACCELERATION; // Renamed
+            if state.key_s_down && !state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= PLAYER_REVERSE_FACTOR };
+            state.player_vel += final_accel_f*delta_time_f; 
+            damping_factor_f := math.max(0.0, 1.0-PLAYER_DAMPING*delta_time_f); // Renamed
+            state.player_vel *= damping_factor_f; 
+            if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
+        }
+
+
         state.player_pos += state.player_vel*delta_time_f;
 
-        rmb_pressed_this_frame_f := state.rmb_down && !state.previous_rmb_down; // Renamed
+        rmb_pressed_this_frame_f := state.rmb_down && !state.previous_rmb_down;
         if rmb_pressed_this_frame_f && state.current_rmb_ammo_charges > 0 {
             remove_visual_ammo_charge_particles(state.current_rmb_ammo_charges - 1); 
         }
