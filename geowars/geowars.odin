@@ -73,7 +73,7 @@ ENEMY_DEATH_SOUND_SINE_AMPLITUDE :: 0.20
 
 // Drum Track Definitions
 DRUM_TRACK_SAMPLE_RATE :: LMB_SOUND_SAMPLE_RATE 
-DRUM_TRACK_CHANNELS :: LMB_SOUND_CHANNELS   
+DRUM_TRACK_CHANNELS :: LMB_SOUND_CHANNELS    
 DRUM_TRACK_BPM :: 160.0
 DRUM_TRACK_BEATS_PER_BAR :: 4
 DRUM_TRACK_NUM_BARS :: 2 
@@ -120,30 +120,30 @@ MAX_BLACKHOLES :: 64
 
 // --- Constants ---
 ORTHO_HEIGHT :: 1.5
-PLAYER_ACCELERATION      :: 15.0
-PLAYER_REVERSE_FACTOR    :: 0.5
-PLAYER_DAMPING           :: 2.5
-PLAYER_MAX_SPEED         :: 7.0
-PLAYER_DASH_SPEED_MULT   :: 1.5  // Multiplier for max speed during dash
-PLAYER_DASH_DURATION     :: 0.15  // Duration of the dash in seconds
-PLAYER_DASH_COOLDOWN     :: 3.0  // Cooldown time in seconds
+PLAYER_ACCELERATION       :: 15.0
+PLAYER_REVERSE_FACTOR     :: 0.5
+PLAYER_DAMPING            :: 2.5
+PLAYER_MAX_SPEED          :: 7.0
+PLAYER_DASH_SPEED_MULT    :: 1.5  // Multiplier for max speed during dash
+PLAYER_DASH_DURATION      :: 0.15 // Duration of the dash in seconds
+PLAYER_DASH_COOLDOWN      :: 3.0  // Cooldown time in seconds
 PLAYER_DASH_TRAIL_LENGTH      :: 4; // Number of after-images
 PLAYER_DASH_TRAIL_SPAWN_RATE  :: 0.035; // Time in seconds between spawning each trail point
-PLAYER_SCALE             :: 0.15
+PLAYER_SCALE              :: 0.15
 PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
 PLAYER_CORE_SHADER_RADIUS :: 0.04
-PLAYER_UV_SPACE_EXTENT   :: 0.5
+PLAYER_UV_SPACE_EXTENT    :: 0.5
 PLAYER_CORE_WORLD_RADIUS :: (PLAYER_CORE_SHADER_RADIUS / PLAYER_UV_SPACE_EXTENT) * PLAYER_SCALE
 PLAYER_BOUNCE_DAMPING_FACTOR :: 1.05
-PLAYER_MAX_HP_VALUE      :: 4 
+PLAYER_MAX_HP_VALUE       :: 4 
 PLAYER_INVULNERABILITY_DURATION :: 0.75 
-PARTICLE_DAMAGE_VALUE    :: 1 
-LMB_PROJECTILE_DAMAGE    :: 2 
+PARTICLE_DAMAGE_VALUE     :: 1 
+LMB_PROJECTILE_DAMAGE     :: 2 
 ENEMY_GRUNT_DAMAGE_VALUE :: 1 
 
 // Black Hole (RMB) Constants
 BLACKHOLE_COOLDOWN_DURATION :: 1.0 
-MAX_SPIN_SPEED           :: f32(m.PI * 2.0)
+MAX_SPIN_SPEED            :: f32(m.PI * 2.0)
 SWIRL_CHARGE_DURATION_BASE  : f32 : 1.8
 SWIRL_CHARGE_DURATION_RAND  : f32 : 0.5
 SWIRL_RADIUS_SPAWN          : f32 : 0.05 
@@ -194,9 +194,9 @@ ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0; // Seconds between detection pr
 ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4; // Vision rectangle width - passed to shader
 
 // NEW Laser Specifics (can be same as vision rect or different)
-BOSS_LASER_LENGTH :: ORTHO_HEIGHT;       // Length of the damaging laser beam
+BOSS_LASER_LENGTH :: ORTHO_HEIGHT;        // Length of the damaging laser beam
 BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5; // Make laser visually thinner than detection rect
-BOSS_LASER_DAMAGE :: 1;                             // Damage dealt by laser on contact (per collision check)
+BOSS_LASER_DAMAGE :: 1;                                // Damage dealt by laser on contact (per collision check)
 ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier for regular enemies
 BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT; // NEW: e.g., 4x screen height, should be plenty
 
@@ -213,7 +213,7 @@ ENEMY_MAX_SPAWN_ATTEMPTS :: 10
 ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
 ENEMY_GROW_DURATION :: 1.0     
 ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7 // For Grunts/Slowboys
-ENEMY_BASE_ALPHA :: 0.65           
+ENEMY_BASE_ALPHA :: 0.65         
 ENEMY_WANDER_INFLUENCE :: 0.35 
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
 ENEMY_GRUNT_MAX_HP :: 4
@@ -245,11 +245,11 @@ RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
 RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
 RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} 
 RMB_AMMO_REGEN_INTERVAL :: 10.0 
-MAX_RMB_AMMO_CHARGES    :: 2    
+MAX_RMB_AMMO_CHARGES    :: 2   
 RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE :: 16 
 RMB_AMMO_INDICATOR_ORBIT_RADIUS         :: PLAYER_SCALE * 0.5 
-RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8        
-RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018              
+RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8         
+RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018            
 RMB_AMMO_INDICATOR_COLOR                :: m.vec4{0.7, 0.4, 1.0, 0.75} 
 RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6         
 
@@ -268,33 +268,33 @@ enemy_quad_stride :: size_of(f32) * 4
 blackhole_quad_stride :: size_of(f32) * 4
 
 Particle :: struct {
-	pos:              m.vec2,
-	vel:              m.vec2,
-	cloud_travel_vel: m.vec2, 
-	color:            m.vec4,
-	size:             f32,
-	start_size:       f32,
-	life_remaining:   f32,
-	life_max:         f32,      
+    pos:              m.vec2,
+    vel:              m.vec2,
+    cloud_travel_vel: m.vec2, 
+    color:            m.vec4,
+    size:             f32,
+    start_size:       f32,
+    life_remaining:   f32,
+    life_max:         f32,      
     swirl_duration:   f32,      
-	rotation:         f32,         
-	angular_vel:      f32,         
+    rotation:         f32,          
+    angular_vel:      f32,          
     charge_center_pos: m.vec2, 
-	is_burst_particle: bool,
+    is_burst_particle: bool,
     is_swirling_charge: bool, 
     is_ammo_indicator: bool, 
-	active:           bool,
+    active:           bool,
     sound_hum: ma.sound,
     sound_whoosh: ma.sound,
     has_active_sound: bool,
 }
 Particle_Instance_Data :: struct #align(16) {
-	using _: struct #packed {
-		instance_pos:      m.vec2,
-		instance_size:     f32,
-		instance_rotation: f32,
-		instance_color:    m.vec4,
-	},
+    using _: struct #packed {
+        instance_pos:      m.vec2,
+        instance_size:     f32,
+        instance_rotation: f32,
+        instance_color:    m.vec4,
+    },
 }
 
 Blackhole_Projectile :: struct {
@@ -340,9 +340,9 @@ LevelDefinition :: struct {
 
 // State for a single enemy type within an active stage
 ActiveStageEnemySpawnState :: struct {
-    config_index: int,      // Index into the StageDefinition.enemy_configs
-    spawn_timer: f32,       // Current timer counting down to next spawn
-    spawned_count: int,     // How many of this enemy type have been spawned for this config
+    config_index: int,       // Index into the StageDefinition.enemy_configs
+    spawn_timer: f32,        // Current timer counting down to next spawn
+    spawned_count: int,      // How many of this enemy type have been spawned for this config
     remaining_to_spawn: int, // How many are left to spawn for this config based on its count
 }
 
@@ -373,12 +373,12 @@ random_generator_progression: runtime.Default_Random_State; // This is our seede
 Enemy :: struct {
     pos: m.vec2,
     vel: m.vec2,
-    color: m.vec4,        
-    target_size: f32,      // Base world size for this enemy type (e.g., ENEMY_GRUNT_SCALE, ENEMY_BOSS_CHROME_ORB_SCALE)
-    current_size: f32,     // Actual current world size (e.g. during grow animation or if dynamically scaled)
-    grow_timer: f32,       
-    is_growing: bool,      
-    rotation: f32,         // For Grunts/Slowboys, their body rotation. For Boss, its aiming direction.
+    color: m.vec4,       
+    target_size: f32,    // Base world size for this enemy type (e.g., ENEMY_GRUNT_SCALE, ENEMY_BOSS_CHROME_ORB_SCALE)
+    current_size: f32,   // Actual current world size (e.g. during grow animation or if dynamically scaled)
+    grow_timer: f32,     
+    is_growing: bool,    
+    rotation: f32,       // For Grunts/Slowboys, their body rotation. For Boss, its aiming direction.
     angular_vel: f32,    
     hp: i32, 
     type: EnemyType, 
@@ -403,7 +403,7 @@ Enemy :: struct {
 
 Enemy_Instance_Data :: struct #align(16) {
     using _: struct #packed {
-        instance_pos: m.vec2,         
+        instance_pos: m.vec2,           
         instance_main_rotation: f32,  // For Grunt/Slowboy body rotation, for Boss aiming direction
         instance_visual_scale: f32,   // This will be enemy.current_size * ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER
         instance_color: m.vec4,       
@@ -437,7 +437,7 @@ state: struct {
     first_slowboy_killed: bool, // <<< NEW
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, 
-    player_invulnerable_timer: f32,    
+    player_invulnerable_timer: f32,   
     player_defeated_message_shown: bool, 
 
     key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool, key_shift_down: bool,
@@ -455,9 +455,9 @@ state: struct {
 
     mouse_screen_pos: m.vec2, 
 
-	particles: [MAX_PARTICLES]Particle, particle_instance_data: [MAX_PARTICLES]Particle_Instance_Data,
-	particle_quad_vbo: sg.Buffer, particle_instance_vbo: sg.Buffer, particle_bind: sg.Bindings,
-	next_particle_index: int, num_active_particles: int,
+    particles: [MAX_PARTICLES]Particle, particle_instance_data: [MAX_PARTICLES]Particle_Instance_Data,
+    particle_quad_vbo: sg.Buffer, particle_instance_vbo: sg.Buffer, particle_bind: sg.Bindings,
+    next_particle_index: int, num_active_particles: int,
 
     blackholes: [MAX_BLACKHOLES]Blackhole_Projectile, blackhole_instance_data: [MAX_BLACKHOLES]Blackhole_Instance_Data,
     blackhole_instance_vbo: sg.Buffer, blackhole_bind: sg.Bindings,
@@ -654,8 +654,8 @@ init :: proc "c" () {
         sample_rate = LMB_SOUND_SAMPLE_RATE, 
         num_channels = LMB_SOUND_CHANNELS,   
         buffer_frames = 1024, 
-        packet_frames = 0,    
-        num_packets = 0,      
+        packet_frames = 0,   
+        num_packets = 0,     
         stream_userdata_cb = geowars_audio_stream_callback,
         user_data = nil, 
     }
@@ -682,7 +682,7 @@ init :: proc "c" () {
     // Generate "Pew" Sound PCM Data
     fmt.printf("--- Generating 'Pew' sound PCM data... ---\n")
     current_phase_lmb: f64 = 0.0 // Renamed to avoid conflict
-   
+    
     for i in 0..<LMB_SOUND_FRAMES {
         progress := f64(i) / f64(LMB_SOUND_FRAMES)
         amplitude_lmb: f64 // Renamed
@@ -699,7 +699,7 @@ init :: proc "c" () {
         current_freq_f64_lmb := f64(LMB_SOUND_START_FREQ) * math.pow(f64(ratio_lmb), exponent_lmb) // Renamed
 
         sample_val_f64_lmb := math.sin(current_phase_lmb) // Renamed
-       
+        
         lmb_sound_pcm_data[i] = f32(sample_val_f64_lmb * amplitude_lmb * f64(LMB_SOUND_AMPLITUDE))
 
         current_phase_lmb += (2.0 * f64(math.PI) * current_freq_f64_lmb) / f64(LMB_SOUND_SAMPLE_RATE)
@@ -1057,9 +1057,9 @@ init :: proc "c" () {
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}
     vertices := [?]f32 { -1,-1,0,0,0,0,0, 1,-1,0,1,0,0,0, -1,1,0,0,1,0,0, 1,1,0,1,1,0,0 }
     state.bind.vertex_buffers[0] = sg.make_buffer({ label="shared-quad-vertices", data=sg.Range{ptr=&vertices[0], size=size_of(vertices)}})
-	
+    
     particle_quad_verts := [?]f32{ -0.5,-0.5,0,0, 0.5,-0.5,1,0, -0.5,0.5,0,1, 0.5,0.5,1,1 }
-	state.particle_quad_vbo = sg.make_buffer({ label="particle-quad-base", data=sg.Range{ptr=&particle_quad_verts[0], size=size_of(particle_quad_verts)}})
+    state.particle_quad_vbo = sg.make_buffer({ label="particle-quad-base", data=sg.Range{ptr=&particle_quad_verts[0], size=size_of(particle_quad_verts)}})
     state.particle_instance_vbo = sg.make_buffer({ label="particle-inst", size=MAX_PARTICLES*size_of(Particle_Instance_Data), type=.VERTEXBUFFER, usage=.STREAM })
     
     state.enemy_instance_vbo = sg.make_buffer({ label="enemy-inst", size=MAX_ENEMIES*size_of(Enemy_Instance_Data), type=.VERTEXBUFFER, usage=.STREAM })
@@ -1077,16 +1077,16 @@ init :: proc "c" () {
     
     state.particle_pip = sg.make_pipeline({ label="particle-pip", shader=particle_shd,
         layout={ buffers={0={stride=particle_quad_stride,step_func=.PER_VERTEX}, 1={stride=size_of(Particle_Instance_Data),step_func=.PER_INSTANCE}}, 
-                 attrs={ATTR_particle_quad_pos={buffer_index=0,offset=0,format=.FLOAT2}, ATTR_particle_quad_uv={buffer_index=0,offset=8,format=.FLOAT2}, 
-                        ATTR_particle_instance_pos_size_rot={buffer_index=1,offset=0,format=.FLOAT4}, ATTR_particle_instance_color={buffer_index=1,offset=16,format=.FLOAT4}} },
+              attrs={ATTR_particle_quad_pos={buffer_index=0,offset=0,format=.FLOAT2}, ATTR_particle_quad_uv={buffer_index=0,offset=8,format=.FLOAT2}, 
+                     ATTR_particle_instance_pos_size_rot={buffer_index=1,offset=0,format=.FLOAT4}, ATTR_particle_instance_color={buffer_index=1,offset=16,format=.FLOAT4}} },
         primitive_type=.TRIANGLE_STRIP, colors={0={blend={enabled=true, src_factor_rgb=.SRC_ALPHA, dst_factor_rgb=.ONE}}}, depth={write_enabled=false, compare=.ALWAYS}
     })
     if sg.query_pipeline_state(state.particle_pip) != .VALID { fmt.eprintf("!!! CRITICAL: Particle pipeline creation failed!\n"); }
 
     state.blackhole_pip = sg.make_pipeline({ label="blackhole-pip", shader=blackhole_shd,
         layout={ buffers={0={stride=blackhole_quad_stride,step_func=.PER_VERTEX}, 1={stride=size_of(Blackhole_Instance_Data),step_func=.PER_INSTANCE}}, 
-                 attrs={ATTR_blackhole_quad_pos={buffer_index=0,offset=0,format=.FLOAT2}, ATTR_blackhole_quad_uv={buffer_index=0,offset=8,format=.FLOAT2}, 
-                        ATTR_blackhole_instance_pos_size_rot={buffer_index=1,offset=0,format=.FLOAT4}, ATTR_blackhole_instance_color={buffer_index=1,offset=16,format=.FLOAT4}} },
+              attrs={ATTR_blackhole_quad_pos={buffer_index=0,offset=0,format=.FLOAT2}, ATTR_blackhole_quad_uv={buffer_index=0,offset=8,format=.FLOAT2}, 
+                     ATTR_blackhole_instance_pos_size_rot={buffer_index=1,offset=0,format=.FLOAT4}, ATTR_blackhole_instance_color={buffer_index=1,offset=16,format=.FLOAT4}} },
         primitive_type=.TRIANGLE_STRIP, colors={0={blend={enabled=true, src_factor_rgb=.SRC_ALPHA, dst_factor_rgb=.ONE_MINUS_SRC_ALPHA}}}, depth={write_enabled=false, compare=.ALWAYS} 
     })
     if sg.query_pipeline_state(state.blackhole_pip) != .VALID { fmt.eprintf("!!! CRITICAL: Blackhole pipeline creation failed!\n"); }
@@ -1118,12 +1118,12 @@ init :: proc "c" () {
     })
     if sg.query_pipeline_state(state.enemy_pip) != .VALID { fmt.eprintf("!!! CRITICAL: Enemy pipeline creation failed!\n"); }
 
-	state.particle_bind = sg.Bindings{ vertex_buffers = { 0=state.particle_quad_vbo, 1=state.particle_instance_vbo } }
+    state.particle_bind = sg.Bindings{ vertex_buffers = { 0=state.particle_quad_vbo, 1=state.particle_instance_vbo } }
     state.enemy_bind = sg.Bindings{ vertex_buffers = { 0=state.particle_quad_vbo, 1=state.enemy_instance_vbo } } 
     state.blackhole_bind = sg.Bindings{ vertex_buffers = {0=state.particle_quad_vbo, 1=state.blackhole_instance_vbo } }
 
 
-	state.next_particle_index = 0; state.num_active_particles = 0;
+    state.next_particle_index = 0; state.num_active_particles = 0;
     state.next_enemy_index = 0; state.num_active_enemies = 0;
     state.next_blackhole_index = 0; state.num_active_blackholes = 0;
 
@@ -1212,7 +1212,7 @@ init :: proc "c" () {
         if len(game_levels[0].stages) > 0 {
              fmt.printf("        Stage 0 Enemy Configs: %d (counts: %d)\n", len(game_levels[0].stages[0].enemy_configs), game_levels[0].stages[0].enemy_configs[0].count);
              if len(game_levels[0].stages[1].enemy_configs) > 1 {
-                fmt.printf("        Stage 1 Enemy Configs: %d (counts: %d, %d)\n", len(game_levels[0].stages[1].enemy_configs), game_levels[0].stages[1].enemy_configs[0].count, game_levels[0].stages[1].enemy_configs[1].count);
+                 fmt.printf("        Stage 1 Enemy Configs: %d (counts: %d, %d)\n", len(game_levels[0].stages[1].enemy_configs), game_levels[0].stages[1].enemy_configs[0].count, game_levels[0].stages[1].enemy_configs[1].count);
              }
              fmt.printf("        Stage 2 (Boss) Enemy Configs: %d (counts: %d)\n", len(game_levels[0].stages[2].enemy_configs), game_levels[0].stages[2].enemy_configs[0].count);
         }
@@ -1251,7 +1251,7 @@ event :: proc "c" (event: ^sapp.Event) {
     case .MOUSE_DOWN: 
         if event.mouse_button == .RIGHT { state.rmb_down = true }
         if event.mouse_button == .LEFT  { state.lmb_down = true }
-	case .MOUSE_UP: 
+    case .MOUSE_UP: 
         if event.mouse_button == .RIGHT { state.rmb_down = false }
         if event.mouse_button == .LEFT  { state.lmb_down = false }
     case .MOUSE_MOVE: 
@@ -1265,7 +1265,7 @@ geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_
 
 // --- Particle System ---
 emit_particle :: proc(part: Particle) {
-	context = runtime.default_context()
+    context = runtime.default_context()
     p_to_init_sound := &state.particles[state.next_particle_index]
     p_to_init_sound^ = part 
     p_to_init_sound.has_active_sound = false 
@@ -1297,24 +1297,24 @@ emit_particle :: proc(part: Particle) {
         }
     }
     p_to_init_sound.active = true 
-	state.next_particle_index = (state.next_particle_index + 1) % MAX_PARTICLES
+    state.next_particle_index = (state.next_particle_index + 1) % MAX_PARTICLES
 }
 
 spawn_swirling_charge :: proc() { 
-	context = runtime.default_context()
+    context = runtime.default_context()
     if state.player_hp <= 0 { return; } 
     charge_spawn_center := state.player_pos 
-	charge_duration := SWIRL_CHARGE_DURATION_BASE + rand.float32() * SWIRL_CHARGE_DURATION_RAND 
+    charge_duration := SWIRL_CHARGE_DURATION_BASE + rand.float32() * SWIRL_CHARGE_DURATION_RAND 
     start_size_val_base := SWIRL_PARTICLE_SIZE_BASE
     start_size_val_rand := SWIRL_PARTICLE_SIZE_RAND
-	start_color := m.vec4{0.8, 0.3, 1.0, 1.0}
+    start_color := m.vec4{0.8, 0.3, 1.0, 1.0}
     cloud_travel_vel: m.vec2 = {0, 0} 
     player_speed_sq := m.len_sq_vec2(state.player_vel)
     player_front_dir := m.vec2{0,1} 
     if m.len_sq_vec2(state.player_vel) > 0.001 { player_front_dir = m.norm_vec2(state.player_vel) }
     cloud_travel_vel = player_front_dir * SWIRL_CLOUD_BASE_PUSH;
     if player_speed_sq > 0.001 && SWIRL_CLOUD_TRAVEL_FACTOR > 0.0 { cloud_travel_vel += state.player_vel * SWIRL_CLOUD_TRAVEL_FACTOR; }
-	for _ in 0..<DEATH_BURST_PARTICLE_COUNT {
+    for _ in 0..<DEATH_BURST_PARTICLE_COUNT {
         start_size_val := start_size_val_base + rand.float32() * start_size_val_rand
         spawn_angle := rand.float32() * f32(m.TAU)
         spawn_dist := rand.float32() * SWIRL_RADIUS_SPAWN
@@ -1328,13 +1328,13 @@ spawn_swirling_charge :: proc() {
         inward_vel := inward_vel_dir * SWIRL_SPEED_INWARD_INITIAL
         start_vel := cloud_travel_vel + orbital_vel + inward_vel
         start_angular_vel := (rand.float32() * 2.0 - 1.0) * MAX_SPIN_SPEED * 2.5
-		emit_particle(Particle{
-			pos=start_pos, vel=start_vel, cloud_travel_vel=cloud_travel_vel, color=start_color,
+        emit_particle(Particle{
+            pos=start_pos, vel=start_vel, cloud_travel_vel=cloud_travel_vel, color=start_color,
             size=start_size_val, start_size=start_size_val, life_remaining=charge_duration, life_max=charge_duration,
             swirl_duration=charge_duration, rotation=rand.float32()*f32(m.TAU), angular_vel=start_angular_vel,
             charge_center_pos=charge_spawn_center, is_burst_particle=false, is_swirling_charge=true, is_ammo_indicator=false, active=false, 
-		})
-	}
+        })
+    }
 }
 
 update_and_instance_particles :: proc(dt: f32) -> int {
@@ -1400,7 +1400,7 @@ update_and_instance_particles :: proc(dt: f32) -> int {
                 p.is_swirling_charge = false;
                 new_life_part := EXPLOSION_LIFETIME_BASE + rand.float32() * EXPLOSION_LIFETIME_RAND; // Renamed
                 p.life_remaining = new_life_part;
-                p.life_max = new_life_part;    
+                p.life_max = new_life_part;   
                 explosion_center_part := p.charge_center_pos + p.cloud_travel_vel * p.swirl_duration; // Renamed
                 relative_pos_part := p.pos - explosion_center_part; // Renamed
                 outward_dir_part : m.vec2 = {rand.float32() * 2.0 - 1.0, rand.float32() * 2.0 - 1.0}; // Renamed
@@ -1428,7 +1428,7 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             
             if p.is_swirling_charge { 
                 p.size = p.start_size; 
-                p.color.a = 1.0;      
+                p.color.a = 1.0;    
             } else { 
                 p.size = p.start_size * life_ratio_part * life_ratio_part; 
                 p.color.a = life_ratio_part * life_ratio_part; 
@@ -1449,25 +1449,25 @@ update_and_instance_particles :: proc(dt: f32) -> int {
 }
 
 spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
-	context = runtime.default_context()
-	for _ in 0..<LMB_ENEMY_DEATH_PARTICLE_COUNT {
-		angle_lmb_d := rand.float32() * m.TAU // Renamed
-		dir_lmb_d := m.angle_to_vec2(angle_lmb_d) // Renamed
-		speed_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
-		life_lmb_d := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
-		size_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
-		angular_vel_lmb_d := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
-		particle_color_lmb_d := base_color; // Renamed
-		particle_color_lmb_d.r = math.min(base_color.r * 1.2 + 0.2, 1.0);
-		particle_color_lmb_d.g = math.min(base_color.g * 1.2 + 0.2, 1.0);
-		particle_color_lmb_d.b = math.min(base_color.b * 1.2 + 0.2, 1.0);
-		particle_color_lmb_d.a = 0.85; 
-		emit_particle(Particle{
-			pos=pos, vel=dir_lmb_d*speed_lmb_d, cloud_travel_vel={0,0}, color=particle_color_lmb_d, size=size_lmb_d, start_size=size_lmb_d,
+    context = runtime.default_context()
+    for _ in 0..<LMB_ENEMY_DEATH_PARTICLE_COUNT {
+        angle_lmb_d := rand.float32() * m.TAU // Renamed
+        dir_lmb_d := m.angle_to_vec2(angle_lmb_d) // Renamed
+        speed_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
+        life_lmb_d := LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
+        size_lmb_d := LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
+        angular_vel_lmb_d := rand.float32_range(-1.0, 1.0) * LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
+        particle_color_lmb_d := base_color; // Renamed
+        particle_color_lmb_d.r = math.min(base_color.r * 1.2 + 0.2, 1.0);
+        particle_color_lmb_d.g = math.min(base_color.g * 1.2 + 0.2, 1.0);
+        particle_color_lmb_d.b = math.min(base_color.b * 1.2 + 0.2, 1.0);
+        particle_color_lmb_d.a = 0.85; 
+        emit_particle(Particle{
+            pos=pos, vel=dir_lmb_d*speed_lmb_d, cloud_travel_vel={0,0}, color=particle_color_lmb_d, size=size_lmb_d, start_size=size_lmb_d,
             life_remaining=life_lmb_d, life_max=life_lmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_lmb_d,
             charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
-		})
-	}
+        })
+    }
 }
 
 spawn_visual_ammo_charge_particles :: proc(charge_slot_index: int) {
@@ -1511,26 +1511,26 @@ remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
 }
 
 spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
-	context = runtime.default_context()
-	base_death_color_rmb := RMB_PARTICLE_COLOR; // Renamed
-	for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
-		angle_rmb_d := rand.float32() * m.TAU // Renamed
-		dir_rmb_d := m.angle_to_vec2(angle_rmb_d) // Renamed
-		speed_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
-		life_rmb_d := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
-		size_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
-		angular_vel_rmb_d := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
-		particle_color_rmb_d := base_death_color_rmb; // Renamed
-		particle_color_rmb_d.r = math.clamp(base_death_color_rmb.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
-		particle_color_rmb_d.g = math.clamp(base_death_color_rmb.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
-		particle_color_rmb_d.b = math.clamp(base_death_color_rmb.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
-		particle_color_rmb_d.a = rand.float32_range(0.6, 0.9); 
-		emit_particle(Particle{
-			pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
+    context = runtime.default_context()
+    base_death_color_rmb := RMB_PARTICLE_COLOR; // Renamed
+    for _ in 0..<RMB_ENEMY_DEATH_PARTICLE_COUNT {
+        angle_rmb_d := rand.float32() * m.TAU // Renamed
+        dir_rmb_d := m.angle_to_vec2(angle_rmb_d) // Renamed
+        speed_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND // Renamed
+        life_rmb_d := RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND // Renamed
+        size_rmb_d := RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE + rand.float32() * RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND // Renamed
+        angular_vel_rmb_d := rand.float32_range(-1.0, 1.0) * RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX // Renamed
+        particle_color_rmb_d := base_death_color_rmb; // Renamed
+        particle_color_rmb_d.r = math.clamp(base_death_color_rmb.r + rand.float32_range(-0.1, 0.1), 0.5, 1.0);
+        particle_color_rmb_d.g = math.clamp(base_death_color_rmb.g + rand.float32_range(-0.1, 0.1), 0.2, 0.8);
+        particle_color_rmb_d.b = math.clamp(base_death_color_rmb.b + rand.float32_range(-0.1, 0.1), 0.7, 1.0);
+        particle_color_rmb_d.a = rand.float32_range(0.6, 0.9); 
+        emit_particle(Particle{
+            pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
             life_remaining=life_rmb_d, life_max=life_rmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_rmb_d,
             charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false, 
-		})
-	}
+        })
+    }
 }
 check_player_boss_laser_collision :: proc() {
     context = runtime.default_context()
@@ -1558,7 +1558,7 @@ check_player_boss_laser_collision :: proc() {
         black_circle_world_center := enemy_laser_coll.pos + boss_facing_direction * world_orbit_radius_for_black_circle;
 
         laser_origin_world := black_circle_world_center; // Laser originates from the black circle's center
-        laser_direction_vec := boss_facing_direction;   // Laser fires in the boss's facing direction
+        laser_direction_vec := boss_facing_direction;    // Laser fires in the boss's facing direction
 
         vec_to_player_from_origin := player_center - laser_origin_world;
             
@@ -1570,7 +1570,7 @@ check_player_boss_laser_collision :: proc() {
         // Check collision with the laser beam segment (approximated as a rectangle + end caps)
         // BOSS_LASER_LENGTH and BOSS_LASER_WIDTH are world units
         if player_local_y >= -player_radius && player_local_y <= (BOSS_LASER_LENGTH + player_radius) && 
-           math.abs(player_local_x) <= (BOSS_LASER_WIDTH / 2.0 + player_radius) {                  
+           math.abs(player_local_x) <= (BOSS_LASER_WIDTH / 2.0 + player_radius) {            
 
             // More precise check for rectangle body of the laser
             if player_local_y > 0 && player_local_y < BOSS_LASER_LENGTH && 
@@ -1883,7 +1883,7 @@ update_and_instance_blackholes :: proc(dt: f32) -> int {
 emit_enemy :: proc(enemy_data: Enemy) {
     context = runtime.default_context()
     idx_to_write_en := state.next_enemy_index // Renamed
-    state.enemies[idx_to_write_en] = enemy_data        
+    state.enemies[idx_to_write_en] = enemy_data       
     state.enemies[idx_to_write_en].active = true       
     state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
 }
@@ -1960,7 +1960,7 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
         pos = start_pos_en, vel = start_vel_en, color = enemy_color_val, 
         target_size = target_world_size, 
         current_size = target_world_size * ENEMY_INITIAL_SCALE_FACTOR, 
-        grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                             
+        grow_timer = ENEMY_GROW_DURATION, is_growing = true,                                                 
         rotation = rand.float32() * m.TAU, 
         angular_vel = enemy_angular_vel,
         hp = initial_hp, type = type_to_spawn, active = false, 
@@ -2011,9 +2011,9 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             
             if enemy_uie.type == .GRUNT {
                  eased_progress_for_scale_uie := math.pow(progress_raw_uie, 2.5); 
-                initial_part_uv_scale_uie : f32 = 1.0; 
-                final_part_uv_scale_uie : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR; 
-                effect_params_z_uie = m.lerp(initial_part_uv_scale_uie, final_part_uv_scale_uie, eased_progress_for_scale_uie);
+                 initial_part_uv_scale_uie : f32 = 1.0; 
+                 final_part_uv_scale_uie : f32 = ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR; 
+                 effect_params_z_uie = m.lerp(initial_part_uv_scale_uie, final_part_uv_scale_uie, eased_progress_for_scale_uie);
             } else { // Slowboy, Boss don't use effect_params_z for part scaling in dying shader
                  effect_params_z_uie = 1.0; 
             }
@@ -2254,7 +2254,7 @@ frame :: proc "c" () {
     state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time_f);
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time_f)
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
-    state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);         // <<< NEW
+    state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);       // <<< NEW
     state.dash_cooldown_timer = math.max(0.0, state.dash_cooldown_timer - delta_time_f); // <<< NEW
 
     if state.player_hp > 0 {
@@ -2275,14 +2275,14 @@ frame :: proc "c" () {
 
 
          if state.current_rmb_ammo_charges < MAX_RMB_AMMO_CHARGES {
-            state.rmb_ammo_regen_timer -= delta_time_f;
-            if state.rmb_ammo_regen_timer <= 0.0 {
-                spawn_visual_ammo_charge_particles(state.current_rmb_ammo_charges);
-                state.current_rmb_ammo_charges += 1;
-                state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL; 
-                fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
-            }
-        }
+             state.rmb_ammo_regen_timer -= delta_time_f;
+             if state.rmb_ammo_regen_timer <= 0.0 {
+                 spawn_visual_ammo_charge_particles(state.current_rmb_ammo_charges);
+                 state.current_rmb_ammo_charges += 1;
+                 state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL; 
+                 fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
+             }
+         }
         accel_input_f := m.vec2_zero(); 
         if state.key_w_down {accel_input_f.y+=1.0}; if state.key_s_down {accel_input_f.y-=1.0}; 
         if state.key_a_down {accel_input_f.x-=1.0}; if state.key_d_down {accel_input_f.x+=1.0};  
@@ -2297,12 +2297,14 @@ frame :: proc "c" () {
                 if state.dash_trail_spawn_timer <= 0.0 {
                     state.dash_trail_spawn_timer = PLAYER_DASH_TRAIL_SPAWN_RATE;
 
+                    // --- START FIX ---
                     // Shift existing trail positions
-                    for i in reverse(1..<PLAYER_DASH_TRAIL_LENGTH) {
-                        state.player_dash_trail_pos[i] = state.player_dash_trail_pos[i-1];
+                    for i := PLAYER_DASH_TRAIL_LENGTH - 1; i > 0; i -= 1 {
+                        state.player_dash_traiL_pos[i] = state.player_dash_traiL_pos[i-1];
                     }
                     // Add new position at the front
-                    state.player_dash_trail_pos[0] = state.player_pos;
+                    state.player_dash_traiL_pos[0] = state.player_pos;
+                    // --- END FIX ---
                     
                     // Increment count, but don't exceed max length
                     if state.player_dash_trail_count < PLAYER_DASH_TRAIL_LENGTH {
@@ -2509,18 +2511,18 @@ frame :: proc "c" () {
     sg.begin_pass({action=state.pass_action, swapchain=sglue.swapchain() });
     sg.apply_pipeline(state.bg_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr=&state.bg_fs_params, size=size_of(Bg_Fs_Params)}); sg.draw(0,4,1);
     sg.apply_pipeline(state.player_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr=&state.player_vs_params, size=size_of(Player_Vs_Params)}); sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr=&state.player_fs_params, size=size_of(Player_Fs_Params)}); sg.draw(0,4,1);
-	
+    
     if state.num_active_particles > 0 {
-		sg.apply_pipeline(state.particle_pip); sg.apply_bindings(state.particle_bind); sg.update_buffer(state.particle_instance_vbo, sg.Range{ptr=rawptr(&state.particle_instance_data[0]), size=uint(state.num_active_particles)*size_of(Particle_Instance_Data)});
-		sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(Particle_Fs_Params)});
-		sg.draw(0, 4, state.num_active_particles);
-	}
+        sg.apply_pipeline(state.particle_pip); sg.apply_bindings(state.particle_bind); sg.update_buffer(state.particle_instance_vbo, sg.Range{ptr=rawptr(&state.particle_instance_data[0]), size=uint(state.num_active_particles)*size_of(Particle_Instance_Data)});
+        sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(Particle_Fs_Params)});
+        sg.draw(0, 4, state.num_active_particles);
+    }
     if state.num_active_blackholes > 0 {
         sg.apply_pipeline(state.blackhole_pip); sg.apply_bindings(state.blackhole_bind); 
         sg.update_buffer(state.blackhole_instance_vbo, sg.Range{ptr=rawptr(&state.blackhole_instance_data[0]), size=uint(state.num_active_blackholes)*size_of(Blackhole_Instance_Data)});
-		sg.apply_uniforms(UB_blackhole_vs_params, sg.Range{ptr=&state.blackhole_vs_params, size=size_of(Blackhole_Vs_Params)}); 
+        sg.apply_uniforms(UB_blackhole_vs_params, sg.Range{ptr=&state.blackhole_vs_params, size=size_of(Blackhole_Vs_Params)}); 
         sg.apply_uniforms(UB_blackhole_fs_params, sg.Range{ptr=&state.blackhole_fs_params, size=size_of(Blackhole_Fs_Params)});
-		sg.draw(0, 4, state.num_active_blackholes);
+        sg.draw(0, 4, state.num_active_blackholes);
     }
     if state.num_active_enemies > 0 {
         sg.apply_pipeline(state.enemy_pip); sg.apply_bindings(state.enemy_bind); 
