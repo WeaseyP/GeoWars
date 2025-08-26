@@ -1,0 +1,154 @@
+package main
+import m "../math"
+
+
+// =============================================================================
+// START: Package-Level Declarations
+// =============================================================================
+
+MAX_PARTICLES :: 2048
+DEATH_BURST_PARTICLE_COUNT :: 150
+MAX_ENEMIES :: 128 
+MAX_BLACKHOLES :: 64 
+
+// --- Constants ---
+ORTHO_HEIGHT :: 1.5
+PLAYER_ACCELERATION       :: 15.0
+PLAYER_REVERSE_FACTOR     :: 0.5
+PLAYER_DAMPING            :: 2.5
+PLAYER_MAX_SPEED          :: 7.0
+PLAYER_DASH_SPEED_MULT    :: 1.5  // Multiplier for max speed during dash
+PLAYER_DASH_DURATION      :: 0.15 // Duration of the dash in seconds
+PLAYER_DASH_COOLDOWN      :: 3.0  // Cooldown time in seconds
+PLAYER_DASH_TRAIL_LENGTH      :: 4; // Number of after-images
+PLAYER_DASH_TRAIL_SPAWN_RATE  :: 0.035; // Time in seconds between spawning each trail point
+PLAYER_SCALE              :: 0.15
+PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
+PLAYER_CORE_SHADER_RADIUS :: 0.04
+PLAYER_UV_SPACE_EXTENT    :: 0.5
+PLAYER_CORE_WORLD_RADIUS :: (PLAYER_CORE_SHADER_RADIUS / PLAYER_UV_SPACE_EXTENT) * PLAYER_SCALE
+PLAYER_BOUNCE_DAMPING_FACTOR :: 1.05
+PLAYER_MAX_HP_VALUE       :: 4 
+PLAYER_INVULNERABILITY_DURATION :: 0.75 
+PARTICLE_DAMAGE_VALUE     :: 1 
+LMB_PROJECTILE_DAMAGE     :: 2 
+ENEMY_GRUNT_DAMAGE_VALUE :: 1 
+
+// Black Hole (RMB) Constants
+BLACKHOLE_COOLDOWN_DURATION :: 1.0 
+MAX_SPIN_SPEED            :: f32(m.PI * 2.0)
+SWIRL_CHARGE_DURATION_BASE  : f32 : 1.8
+SWIRL_CHARGE_DURATION_RAND  : f32 : 0.5
+SWIRL_RADIUS_SPAWN          : f32 : 0.05 
+SWIRL_SPEED_ORBITAL_BASE    : f32 : 3.5  
+SWIRL_SPEED_INWARD_INITIAL  : f32 : -0.1 
+SWIRL_PARTICLE_SIZE_BASE    : f32 : 0.03 
+SWIRL_PARTICLE_SIZE_RAND    : f32 : 0.01
+SWIRL_CLOUD_TRAVEL_FACTOR   : f32 : 0.0 
+SWIRL_CLOUD_BASE_PUSH       : f32 : 0.15 
+
+
+// *** Explosion Constants (after swirl) ***
+EXPLOSION_LIFETIME_BASE : f32 : 1.0
+EXPLOSION_LIFETIME_RAND : f32 : 0.8
+EXPLOSION_SPEED_BASE    : f32 : 6.0  
+EXPLOSION_SPEED_RAND    : f32 : 4.0  
+EXPLOSION_PARTICLE_SPIN : f32 : 0.0  
+
+// Black Hole Projectile (LMB) Constants
+PROJECTILE_BLACKHOLE_COOLDOWN :: 0.25 
+PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 5.0 
+PROJECTILE_BLACKHOLE_LIFETIME :: 3.0 
+PROJECTILE_BLACKHOLE_SCALE :: 0.12
+PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY :: m.PI * 1.5
+
+
+// --- Enemy Constants ---
+ENEMY_GRUNT_SCALE :: 0.2
+ENEMY_GRUNT_SPEED :: f32(0.5)
+// --- SlowBoy Constants ---
+ENEMY_SLOWBOY_BASE_SCALE :: 0.25
+ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0 // Used in shader, passed via effect_params.z for SlowBoy
+ENEMY_SLOWBOY_SPEED :: f32(0.15)
+ENEMY_SLOWBOY_MAX_HP :: 16
+// --- SlowBoy Attack Constants ---
+SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8; 
+SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5;
+// --- Boss Chrome Orb Constants ---
+ENEMY_BOSS_CHROME_ORB_SCALE :: 0.2; // This is the 'current_size' in Odin for the boss entity
+ENEMY_BOSS_CHROME_ORB_MAX_HP :: 100;
+ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL :: m.PI / 2.0; // Radians per second for black circle rotation (not used for main body)
+ENEMY_BOSS_HORIZONTAL_SPEED :: 1.0; // World units per second
+ENEMY_BOSS_SPAWN_Y_OFFSET :: ORTHO_HEIGHT * 0.75; // Spawn near the top of the screen
+ENEMY_BOSS_SCREEN_PADDING :: 0.2; // Padding from screen edges
+ENEMY_BOSS_VISION_ANGLE :: m.PI / 3.0; // 60 degree cone (PI/3 radians) - AI use, not directly shader
+ENEMY_BOSS_VISION_RANGE :: ORTHO_HEIGHT * 1.2; // Vision range - passed to shader
+ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0; // Seconds between detection prints
+ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4; // Vision rectangle width - passed to shader
+
+// NEW Laser Specifics (can be same as vision rect or different)
+BOSS_LASER_LENGTH :: ORTHO_HEIGHT;        // Length of the damaging laser beam
+BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5; // Make laser visually thinner than detection rect
+BOSS_LASER_DAMAGE :: 1;                                // Damage dealt by laser on contact (per collision check)
+ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier for regular enemies
+BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT; // NEW: e.g., 4x screen height, should be plenty
+
+
+SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 
+SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5; 
+SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0; 
+SLOWBOY_ATTACK_DAMAGE :: 1;
+// --- Common Enemy Constants ---
+ENEMY_SPAWN_INTERVAL :: 0.5
+ENEMY_SPAWN_BORDER_FRACTION :: 0.5 
+ENEMY_MIN_SPAWN_DIST_FROM_PLAYER_SQ :: 0.5 * 0.5 
+ENEMY_MAX_SPAWN_ATTEMPTS :: 10
+ENEMY_INITIAL_SCALE_FACTOR :: 0.1 
+ENEMY_GROW_DURATION :: 1.0     
+ENEMY_MAX_ANGULAR_SPEED :: m.PI / 0.7 // For Grunts/Slowboys
+ENEMY_BASE_ALPHA :: 0.65         
+ENEMY_WANDER_INFLUENCE :: 0.35 
+ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5 
+ENEMY_GRUNT_MAX_HP :: 4
+ENEMY_DEATH_ANIM_DURATION :: 1.0  // General, can be overridden
+GRUNT_DEATH_ANIM_DURATION :: 3.0 
+SLOWBOY_DEATH_ANIM_DURATION :: 1.0
+BOSS_DEATH_ANIM_DURATION :: 4.0 // Longer for boss
+ENEMY_DEATH_RECT_SEPARATION_SPEED :: 0.3 
+ENEMY_DEATH_RECT_FINAL_SCALE_FACTOR :: 0.0 
+
+// Enemy Death Particle Constants
+LMB_ENEMY_DEATH_PARTICLE_COUNT :: 20
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.3
+LMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.2
+LMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.5  
+LMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.8
+LMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.025 
+LMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.01
+LMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.4
+
+// RMB Enemy Death Particle Constants
+RMB_ENEMY_DEATH_PARTICLE_COUNT :: 10 
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_BASE :: 0.25
+RMB_ENEMY_DEATH_PARTICLE_LIFETIME_RAND :: 0.15
+RMB_ENEMY_DEATH_PARTICLE_SPEED_BASE :: 2.0
+RMB_ENEMY_DEATH_PARTICLE_SPEED_RAND :: 1.2
+RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015 
+RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
+RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
+RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9} 
+RMB_AMMO_REGEN_INTERVAL :: 10.0 
+MAX_RMB_AMMO_CHARGES    :: 2   
+RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE :: 16 
+RMB_AMMO_INDICATOR_ORBIT_RADIUS         :: PLAYER_SCALE * 0.5 
+RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8         
+RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018            
+RMB_AMMO_INDICATOR_COLOR                :: m.vec4{0.7, 0.4, 1.0, 0.75} 
+RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6         
+
+// Rendering Internals
+vertex_stride :: size_of(f32) * 7
+
+particle_quad_stride :: size_of(f32) * 4
+enemy_quad_stride :: size_of(f32) * 4 
+blackhole_quad_stride :: size_of(f32) * 4
