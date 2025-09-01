@@ -1,7 +1,7 @@
 package main
 
-import m "../math"
-import ma "../miniaudio"
+import m "../vendor/math"
+import ma "../vendor/miniaudio"
 import "base:runtime"
 
 
