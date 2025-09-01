@@ -2,6 +2,7 @@ package main
 import "core:fmt"
 import "base:runtime"
 import rand "core:math/rand"
+import shared "../../shared"
 
 
 
@@ -53,8 +54,8 @@ update_progression :: proc() {
 handle_enemy_spawning :: proc(dt: f32, aspect_f: f32) {
     // --- New Stage-Based Enemy Spawning ---
     if !state.progression.active_stage.all_enemies_for_stage_spawned && state.player_hp > 0 { // Only spawn if player is alive
-        current_level_def: ^LevelDefinition;
-        current_stage_def: ^StageDefinition;
+        current_level_def: ^shared.LevelDefinition;
+        current_stage_def: ^shared.StageDefinition;
         
         if state.progression.current_level_index < len(game_levels) {
             current_level_def = &game_levels[state.progression.current_level_index];
@@ -140,7 +141,7 @@ load_and_initialize_stage_progression :: proc(level_idx: int, stage_idx: int) {
     if len(current_stage_def.enemy_configs) > 0 {
         // Reserve if desired, but append will grow it: reserve(&state.progression.active_stage.enemy_spawn_states, len(current_stage_def.enemy_configs));
         for config, config_idx in current_stage_def.enemy_configs {
-            spawn_state := ActiveStageEnemySpawnState {
+            spawn_state := shared.ActiveStageEnemySpawnState {
                 config_index       = config_idx,
                 spawn_timer        = rand.float32_range(config.min_spawn_delay, config.max_spawn_delay, runtime.default_random_generator(&random_generator_progression)),
                 spawned_count      = 0,
