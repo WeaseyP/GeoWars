@@ -1,10 +1,10 @@
 package main
 import "base:runtime"
-import ma "../miniaudio"
+import ma "../../vendor/miniaudio"
 import "core:fmt"
 import rand "core:math/rand"
-import m "../math"
-import sapp "../sokol/app"
+import ma "../../vendor/miniaudio"
+import sapp "../../vendor/sokol/app"
 import "core:math"
 
 

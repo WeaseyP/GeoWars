@@ -1,8 +1,8 @@
 package main
 
 import "base:runtime"
-import m "../math"
-import ma "../miniaudio"
+import m "../../vendor/math"
+import ma "../../vendor/miniaudio"
 import "core:fmt"
 
 

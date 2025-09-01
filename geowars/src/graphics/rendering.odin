@@ -1,8 +1,8 @@
 package main
-import sg "../sokol/gfx"
+
+import sg "../vendor/sokol/gfx"
 import "core:fmt"
 import "core:math"
-
 
 init_rendering :: proc() {
     state.pass_action = {colors = {0={load_action = .DONTCARE}}}

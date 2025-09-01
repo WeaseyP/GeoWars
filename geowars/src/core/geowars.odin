@@ -1,5 +1,3 @@
-// File: geowars.odin (Revised for Grunt-Player Collision Damage & Synth Track)
-//------------------------------------------------------------------------------
 package main
 
 import "base:runtime"
@@ -7,14 +5,25 @@ import "core:math"
 import "core:mem"
 import "core:fmt"
 import "core:c"
-import slog "../sokol/log"
-import sg "../sokol/gfx"
-import sapp "../sokol/app"
-import sglue "../sokol/glue"
-import sa "../sokol/audio"
-import ma "../miniaudio"
-import m "../math"
+import slog "../vendor/sokol/log"
+import sg "../vendor/sokol/gfx"
+import sapp "../vendor/sokol/app"
+import sglue "../vendor/sokol/glue"
+import sa "../vendor/sokol/audio"
+import ma "../vendor/miniaudio"
+import m "../vendor/math"
 import rand "core:math/rand"
+
+import constants "../core/constants"
+import "core:os"
+import progression "../game/progression"
+import player "../game/player"
+import enemy "../game/enemy"
+import particle "../game/particle"
+import projectile "../game/projectile"
+import collision "../game/collision"
+import audio "../audio"
+import graphics "../graphics"
 
 
 // =============================================================================

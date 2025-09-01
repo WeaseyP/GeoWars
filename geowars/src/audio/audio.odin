@@ -1,14 +1,13 @@
 package main
 
-import ma "../miniaudio"
-import m "../math"
+import ma "../vendor/miniaudio"
+import m "../vendor/math"
 import "core:math"
 import "core:fmt"
-import sa "../sokol/audio"
+import sa "../vendor/sokol/audio"
 import rand "core:math/rand"
 import "base:runtime"
 import "core:c"
-
 
 
 // --- Global Variables and Constants ---
@@ -77,7 +76,7 @@ drum_track_pcm_data: []f32
 drum_track_audio_buffer: ma.audio_buffer
 
 // SYNTH TRACK DEFINITIONS
-SYNTH_TRACK_SAMPLE_RATE :: DRUM_TRACK_SAMPLE_RATE
+SYNTH_TRACK_SAMPLE_RATE :: DRUM_TRACK_SAMPLE_rate
 SYNTH_TRACK_CHANNELS :: DRUM_TRACK_CHANNELS
 SYNTH_TRACK_BPM :: DRUM_TRACK_BPM
 SYNTH_TRACK_BEATS_PER_BAR :: DRUM_TRACK_BEATS_PER_BAR

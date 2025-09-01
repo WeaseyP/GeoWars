@@ -1,7 +1,7 @@
 package main
-import m "../math"
+import m "../../vendor/math"
 import "base:runtime"
-import sapp "../sokol/app"
+import sapp "../../vendor/sokol/app"
 import rand "core:math/rand"
 import "core:math"
 
