@@ -14,7 +14,6 @@ import ma "../vendor/miniaudio"
 import m "../vendor/math"
 import rand "core:math/rand"
 
-import constants "../core/constants"
 import "core:os"
 import progression "../game/progression"
 import player "../game/player"
