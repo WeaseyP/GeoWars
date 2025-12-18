@@ -1,7 +1,7 @@
-package main
+package shared
 
 import m "../vendor/math"
-import ma "../vendor/miniaudio"
+import ma "../../vendor/miniaudio"
 import "base:runtime"
 
 

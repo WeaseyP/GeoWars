@@ -1,4 +1,4 @@
-package main
+package enemy
 import m "../../vendor/math"
 
 import "base:runtime"
@@ -14,10 +14,10 @@ import sapp "../../vendor/sokol/app"
 // --- Enemy System ---
 emit_enemy :: proc(enemy_data: shared.Enemy) {
     context = runtime.default_context()
-    idx_to_write_en := state.next_enemy_index // Renamed
-    state.enemies[idx_to_write_en] = enemy_data       
-    state.enemies[idx_to_write_en].active = true       
-    state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
+    idx_to_write_en := shared.state.next_enemy_index // Renamed
+    shared.state.enemies[idx_to_write_en] = enemy_data
+    shared.state.enemies[idx_to_write_en].active = true
+    shared.state.next_enemy_index = (shared.state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
 spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: shared.EnemyType) { 
@@ -131,11 +131,11 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
 update_and_instance_enemies :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_enemy_count := 0
-    player_pos_uie := state.player_pos 
+    player_pos_uie := shared.state.player_pos
 
     for i in 0..<MAX_ENEMIES {
-        if !state.enemies[i].active { continue }
-        enemy_uie := &state.enemies[i] 
+        if !shared.state.enemies[i].active { continue }
+        enemy_uie := &shared.state.enemies[i]
 
         has_updated_pos_for_charge_bounce_uie := false; 
         
@@ -441,7 +441,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         }
 
         if live_enemy_count < MAX_ENEMIES {
-            inst_uie := &state.enemy_instance_data[live_enemy_count]; 
+            inst_uie := &shared.state.enemy_instance_data[live_enemy_count];
             inst_uie.instance_pos = enemy_uie.pos;
             inst_uie.instance_main_rotation = enemy_uie.rotation; // For Grunt/Slowbody rotation, Boss aiming
             if enemy_uie.type == .BOSS_CHROME_ORB {
