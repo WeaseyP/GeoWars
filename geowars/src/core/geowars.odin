@@ -1,5 +1,3 @@
-// File: geowars.odin (Revised for Grunt-Player Collision Damage & Synth Track)
-//------------------------------------------------------------------------------
 package main
 
 import "base:runtime"
@@ -7,14 +5,25 @@ import "core:math"
 import "core:mem"
 import "core:fmt"
 import "core:c"
-import slog "../sokol/log"
-import sg "../sokol/gfx"
-import sapp "../sokol/app"
-import sglue "../sokol/glue"
-import sa "../sokol/audio"
-import ma "../miniaudio"
-import m "../math"
+import slog "../vendor/sokol/log"
+import sg "../vendor/sokol/gfx"
+import sapp "../vendor/sokol/app"
+import sglue "../vendor/sokol/glue"
+import sa "../vendor/sokol/audio"
+import ma "../vendor/miniaudio"
+import m "../vendor/math"
 import rand "core:math/rand"
+
+import "core:os"
+import progression "../game/progression"
+import player "../game/player"
+import enemy "../game/enemy"
+import particle "../game/particle"
+import projectile "../game/projectile"
+import collision "../game/collision"
+import audio "../audio"
+import graphics "../graphics"
+import shared "../shared"
 
 
 // =============================================================================
@@ -28,13 +37,13 @@ import rand "core:math/rand"
 
 // --- Global State ---
 state: struct {
-    progression: GameProgression,
+    progression: shared.GameProgression,
     pass_action: sg.Pass_Action, bind: sg.Bindings,
     bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline,
-    bg_fs_params: Bg_Fs_Params, player_vs_params: Player_Vs_Params, player_fs_params: Player_Fs_Params,
-    particle_vs_params: Particle_Vs_Params, particle_fs_params: Particle_Fs_Params,
-    enemy_vs_params: Enemy_Vs_Params, enemy_fs_params: Enemy_Fs_Params, 
-    blackhole_vs_params: Blackhole_Vs_Params, blackhole_fs_params: Blackhole_Fs_Params,
+    bg_fs_params: shared.Bg_Fs_Params, player_vs_params: shared.Player_Vs_Params, player_fs_params: shared.Player_Fs_Params,
+    particle_vs_params: shared.Particle_Vs_Params, particle_fs_params: shared.Particle_Fs_Params,
+    enemy_vs_params: shared.Enemy_Vs_Params, enemy_fs_params: shared.Enemy_Fs_Params, 
+    blackhole_vs_params: shared.Blackhole_Vs_Params, blackhole_fs_params: shared.Blackhole_Fs_Params,
 
     audio_engine: ma.engine,
     lmb_sound: ma.sound,
@@ -67,15 +76,15 @@ state: struct {
 
     mouse_screen_pos: m.vec2, 
 
-    particles: [MAX_PARTICLES]Particle, particle_instance_data: [MAX_PARTICLES]Particle_Instance_Data,
+    particles: [MAX_PARTICLES]shared.Particle, particle_instance_data: [MAX_PARTICLES]shared.Particle_Instance_Data,
     particle_quad_vbo: sg.Buffer, particle_instance_vbo: sg.Buffer, particle_bind: sg.Bindings,
     next_particle_index: int, num_active_particles: int,
 
-    blackholes: [MAX_BLACKHOLES]Blackhole_Projectile, blackhole_instance_data: [MAX_BLACKHOLES]Blackhole_Instance_Data,
+    blackholes: [MAX_BLACKHOLES]shared.Blackhole_Projectile, blackhole_instance_data: [MAX_BLACKHOLES]shared.Blackhole_Instance_Data,
     blackhole_instance_vbo: sg.Buffer, blackhole_bind: sg.Bindings,
     next_blackhole_index: int, num_active_blackholes: int,
 
-    enemies: [MAX_ENEMIES]Enemy, enemy_instance_data: [MAX_ENEMIES]Enemy_Instance_Data,
+    enemies: [MAX_ENEMIES]shared.Enemy, enemy_instance_data: [MAX_ENEMIES]shared.Enemy_Instance_Data,
     enemy_instance_vbo: sg.Buffer, enemy_bind: sg.Bindings,
     next_enemy_index: int, num_active_enemies: int,
     grunt_spawn_timer: f32, 
@@ -132,26 +141,26 @@ init :: proc "c" () {
 
     // --- Initialize Level Definitions ---
     fmt.printf("--- Initializing Level Definitions ---\n");
-    game_levels = make([]LevelDefinition, 1);
+    game_levels = make([]shared.LevelDefinition, 1);
 
     // --- Level 1 Definition ---
-    game_levels[0] = LevelDefinition{
+    game_levels[0] = shared.LevelDefinition{
         // Define boss_config first, as the boss stage will refer to it.
-        boss_config = EnemySpawnConfig {
+        boss_config = shared.EnemySpawnConfig {
             enemy_type = .BOSS_CHROME_ORB,
             count = 1,
             min_spawn_delay = 1.0, // Boss usually has a fixed or minimal delay once triggered
             max_spawn_delay = 1.0,
         },
         // Initialize stages slice for 2 regular stages + 1 boss stage
-        stages = make([]StageDefinition, 3), 
+        stages = make([]shared.StageDefinition, 3), 
     };
 
     // --- Level 1, Stage 1 ---
-    game_levels[0].stages[0] = StageDefinition{
-        enemy_configs = make([]EnemySpawnConfig, 1),
+    game_levels[0].stages[0] = shared.StageDefinition{
+        enemy_configs = make([]shared.EnemySpawnConfig, 1),
     };
-    game_levels[0].stages[0].enemy_configs[0] = EnemySpawnConfig {
+    game_levels[0].stages[0].enemy_configs[0] = shared.EnemySpawnConfig {
         enemy_type = .GRUNT,
         count = 1, // Test with a few grunts
         min_spawn_delay = 0.5,
@@ -159,16 +168,16 @@ init :: proc "c" () {
     };
 
     // --- Level 1, Stage 2 ---
-    game_levels[0].stages[1] = StageDefinition{
-        enemy_configs = make([]EnemySpawnConfig, 2), // Two types of enemies in this stage
+    game_levels[0].stages[1] = shared.StageDefinition{
+        enemy_configs = make([]shared.EnemySpawnConfig, 2), // Two types of enemies in this stage
     };
-    game_levels[0].stages[1].enemy_configs[0] = EnemySpawnConfig {
+    game_levels[0].stages[1].enemy_configs[0] = shared.EnemySpawnConfig {
         enemy_type = .GRUNT,
         count = 1, // More grunts
         min_spawn_delay = 0.8,
         max_spawn_delay = 2.0,
     };
-    game_levels[0].stages[1].enemy_configs[1] = EnemySpawnConfig {
+    game_levels[0].stages[1].enemy_configs[1] = shared.EnemySpawnConfig {
         enemy_type = .SLOWBOY,
         count = 1, // A couple of slowboys
         min_spawn_delay = 2.0,
@@ -177,8 +186,8 @@ init :: proc "c" () {
 
     // --- Level 1, Stage 3 (Boss Stage) ---
     // This stage uses the boss_config defined in the LevelDefinition.
-    game_levels[0].stages[2] = StageDefinition{
-        enemy_configs = make([]EnemySpawnConfig, 1),
+    game_levels[0].stages[2] = shared.StageDefinition{
+        enemy_configs = make([]shared.EnemySpawnConfig, 1),
     };
     // Assign the boss configuration to the enemy config of the boss stage.
     game_levels[0].stages[2].enemy_configs[0] = game_levels[0].boss_config; 
@@ -284,26 +293,26 @@ frame :: proc "c" () {
 
 
     sg.begin_pass({action=state.pass_action, swapchain=sglue.swapchain() });
-    sg.apply_pipeline(state.bg_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr=&state.bg_fs_params, size=size_of(Bg_Fs_Params)}); sg.draw(0,4,1);
-    sg.apply_pipeline(state.player_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr=&state.player_vs_params, size=size_of(Player_Vs_Params)}); sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr=&state.player_fs_params, size=size_of(Player_Fs_Params)}); sg.draw(0,4,1);
+    sg.apply_pipeline(state.bg_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_bg_fs_params, sg.Range{ptr=&state.bg_fs_params, size=size_of(shared.Bg_Fs_Params)}); sg.draw(0,4,1);
+    sg.apply_pipeline(state.player_pip); sg.apply_bindings(state.bind); sg.apply_uniforms(UB_Player_Vs_Params, sg.Range{ptr=&state.player_vs_params, size=size_of(shared.Player_Vs_Params)}); sg.apply_uniforms(UB_Player_Fs_Params, sg.Range{ptr=&state.player_fs_params, size=size_of(shared.Player_Fs_Params)}); sg.draw(0,4,1);
     
     if state.num_active_particles > 0 {
-        sg.apply_pipeline(state.particle_pip); sg.apply_bindings(state.particle_bind); sg.update_buffer(state.particle_instance_vbo, sg.Range{ptr=rawptr(&state.particle_instance_data[0]), size=uint(state.num_active_particles)*size_of(Particle_Instance_Data)});
-        sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(Particle_Fs_Params)});
+        sg.apply_pipeline(state.particle_pip); sg.apply_bindings(state.particle_bind); sg.update_buffer(state.particle_instance_vbo, sg.Range{ptr=rawptr(&state.particle_instance_data[0]), size=uint(state.num_active_particles)*size_of(shared.Particle_Instance_Data)});
+        sg.apply_uniforms(UB_particle_vs_params, sg.Range{ptr=&state.particle_vs_params, size=size_of(shared.Particle_Vs_Params)}); sg.apply_uniforms(UB_particle_fs_params, sg.Range{ptr=&state.particle_fs_params, size=size_of(shared.Particle_Fs_Params)});
         sg.draw(0, 4, state.num_active_particles);
     }
     if state.num_active_blackholes > 0 {
         sg.apply_pipeline(state.blackhole_pip); sg.apply_bindings(state.blackhole_bind); 
-        sg.update_buffer(state.blackhole_instance_vbo, sg.Range{ptr=rawptr(&state.blackhole_instance_data[0]), size=uint(state.num_active_blackholes)*size_of(Blackhole_Instance_Data)});
-        sg.apply_uniforms(UB_blackhole_vs_params, sg.Range{ptr=&state.blackhole_vs_params, size=size_of(Blackhole_Vs_Params)}); 
-        sg.apply_uniforms(UB_blackhole_fs_params, sg.Range{ptr=&state.blackhole_fs_params, size=size_of(Blackhole_Fs_Params)});
+        sg.update_buffer(state.blackhole_instance_vbo, sg.Range{ptr=rawptr(&state.blackhole_instance_data[0]), size=uint(state.num_active_blackholes)*size_of(shared.Blackhole_Instance_Data)});
+        sg.apply_uniforms(UB_blackhole_vs_params, sg.Range{ptr=&state.blackhole_vs_params, size=size_of(shared.Blackhole_Vs_Params)}); 
+        sg.apply_uniforms(UB_blackhole_fs_params, sg.Range{ptr=&state.blackhole_fs_params, size=size_of(shared.Blackhole_Fs_Params)});
         sg.draw(0, 4, state.num_active_blackholes);
     }
     if state.num_active_enemies > 0 {
         sg.apply_pipeline(state.enemy_pip); sg.apply_bindings(state.enemy_bind); 
-        sg.update_buffer(state.enemy_instance_vbo, sg.Range{ptr=rawptr(&state.enemy_instance_data[0]), size=uint(state.num_active_enemies)*size_of(Enemy_Instance_Data)})
-        sg.apply_uniforms(UB_enemy_vs_params, sg.Range{ptr=&state.enemy_vs_params, size=size_of(Enemy_Vs_Params)}) 
-        sg.apply_uniforms(UB_enemy_fs_params, sg.Range{ptr=&state.enemy_fs_params, size=size_of(Enemy_Fs_Params)}) 
+        sg.update_buffer(state.enemy_instance_vbo, sg.Range{ptr=rawptr(&state.enemy_instance_data[0]), size=uint(state.num_active_enemies)*size_of(shared.Enemy_Instance_Data)})
+        sg.apply_uniforms(UB_enemy_vs_params, sg.Range{ptr=&state.enemy_vs_params, size=size_of(shared.Enemy_Vs_Params)}) 
+        sg.apply_uniforms(UB_enemy_fs_params, sg.Range{ptr=&state.enemy_fs_params, size=size_of(shared.Enemy_Fs_Params)}) 
         sg.draw(0, 4, state.num_active_enemies)
     }
     sg.end_pass(); sg.commit();

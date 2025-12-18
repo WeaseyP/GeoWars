@@ -1,17 +1,18 @@
 package main
-import m "../math"
+import m "../../vendor/math"
 
 import "base:runtime"
 import "core:fmt"
 import rand "core:math/rand"
 import "core:math"
-import sapp "../sokol/app"
+import shared "../../shared"
+import sapp "../../vendor/sokol/app"
 
 
 
 
 // --- Enemy System ---
-emit_enemy :: proc(enemy_data: Enemy) {
+emit_enemy :: proc(enemy_data: shared.Enemy) {
     context = runtime.default_context()
     idx_to_write_en := state.next_enemy_index // Renamed
     state.enemies[idx_to_write_en] = enemy_data       
@@ -19,7 +20,7 @@ emit_enemy :: proc(enemy_data: Enemy) {
     state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
-spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: EnemyType) { 
+spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: shared.EnemyType) { 
     context = runtime.default_context()
     start_pos_en: m.vec2 // Renamed
     valid_spawn_found_en := false // Renamed
@@ -53,7 +54,7 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
     initial_wander_angle_en := rand.float32() * m.TAU // Renamed
     initial_wander_vector_en := m.angle_to_vec2(initial_wander_angle_en) // Renamed
 
-    enemy_to_spawn: Enemy
+    enemy_to_spawn: shared.Enemy
     
     target_world_size: f32;
     initial_hp: i32;
@@ -87,7 +88,7 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             return; 
     }
 
-    enemy_to_spawn = Enemy {
+    enemy_to_spawn = shared.Enemy {
         pos = start_pos_en, vel = start_vel_en, color = enemy_color_val, 
         target_size = target_world_size, 
         current_size = target_world_size * ENEMY_INITIAL_SCALE_FACTOR, 

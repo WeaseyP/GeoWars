@@ -1,9 +1,8 @@
-@echo off
-echo Building Shaders...
-sokol-shdc -i geowars/shader.glsl -o geowars/shader.odin -l hlsl5:wgsl -f sokol_odin
+#!/bin/bash
 
-echo Building GeoWars for Windows (Release)...
-odin build geowars -o:speed -out:geowars_windows.exe
-REM Using -out: to give it a platform-specific name, good practice
+echo "Building Shaders..."
+sokol-shdc -i geowars/assets/shaders/shader.glsl -o geowars/src/shared/shader.odin -l hlsl5:wgsl -f sokol_odin
 
-echo Done! Find geowars_windows.exe in this directory.
+echo "Building GeoWars for Windows (Release)..."
+odin build geowars/src/core -o:speed -out:geowars_windows.exe
+echo "Done! Find geowars_windows.exe in this directory."

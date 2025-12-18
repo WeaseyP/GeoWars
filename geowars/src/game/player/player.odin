@@ -1,10 +1,10 @@
 package main
 
-import m "../math"
+import m "../../vendor/math"
 import "core:math"
 import "core:fmt"
-import ma "../miniaudio"
-import sapp "../sokol/app"
+import ma "../../vendor/miniaudio"
+import sapp "../../vendor/sokol/app"
 import "base:runtime"
 
 

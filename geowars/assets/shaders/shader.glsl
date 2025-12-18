@@ -1,8 +1,8 @@
 // File: shader.glsl (Merged Version, with Player Health Display)
 //------------------------------------------------------------------------------
 @header package main
-@header import sg "../sokol/gfx"
-@header import m "../math"
+@header import sg "../vendor/sokol/gfx"
+@header import m "../vendor/math"
 @ctype mat4 m.mat4
 @ctype vec2 m.vec2
 @ctype vec4 m.vec4 // Added for particle color instance data
