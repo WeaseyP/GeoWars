@@ -10,6 +10,7 @@ import sg "../vendor/sokol/gfx"
 import sapp "../vendor/sokol/app"
 import sglue "../vendor/sokol/glue"
 import sa "../vendor/sokol/audio"
+import sdtx "../vendor/sokol/debugtext"
 import ma "../vendor/miniaudio"
 import m "../vendor/math"
 import rand "core:math/rand"
@@ -35,8 +36,25 @@ import shared "../shared"
 // =============================================================================
 
 
+GameState :: enum {
+    MainMenu,
+    Playing,
+    LevelUp,
+    BossEncounter,
+    GameOver,
+}
+
+SurgeNode :: struct {
+    pos: m.vec2,
+    rotation: f32,
+    active: bool,
+}
+
 // --- Global State ---
 state: struct {
+    game_state: GameState,
+    surge_node: SurgeNode,
+    wave_transition_timer: f32,
     progression: shared.GameProgression,
     pass_action: sg.Pass_Action, bind: sg.Bindings,
     bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline,
@@ -101,6 +119,7 @@ state: struct {
 init :: proc "c" () {
     context = runtime.default_context()
     sg.setup({ pipeline_pool_size=16, buffer_pool_size=16, shader_pool_size=16, environment=sglue.environment(), logger={func=slog.func} }) // Increased pool sizes slightly
+    sdtx.setup({ fonts = { 0 = sdtx.font_kc856() }, logger = { func = slog.func } })
     fmt.printf("--- Init Start ---\n")
 
     init_audio()
@@ -139,58 +158,61 @@ init :: proc "c" () {
     state.first_grunt_killed = false;
     state.first_slowboy_killed = false; // <<< NEW
 
+    state.game_state = .Playing // Start playing immediately for now
+    state.surge_node = SurgeNode{ active = false }
+    state.wave_transition_timer = 0.0
+
     // --- Initialize Level Definitions ---
     fmt.printf("--- Initializing Level Definitions ---\n");
     game_levels = make([]shared.LevelDefinition, 1);
 
-    // --- Level 1 Definition ---
+    // --- Level 1 Definition (8 Waves) ---
     game_levels[0] = shared.LevelDefinition{
-        // Define boss_config first, as the boss stage will refer to it.
         boss_config = shared.EnemySpawnConfig {
             enemy_type = .BOSS_CHROME_ORB,
             count = 1,
-            min_spawn_delay = 1.0, // Boss usually has a fixed or minimal delay once triggered
+            min_spawn_delay = 1.0,
             max_spawn_delay = 1.0,
         },
-        // Initialize stages slice for 2 regular stages + 1 boss stage
-        stages = make([]shared.StageDefinition, 3), 
+        stages = make([]shared.StageDefinition, 8),
     };
 
-    // --- Level 1, Stage 1 ---
-    game_levels[0].stages[0] = shared.StageDefinition{
-        enemy_configs = make([]shared.EnemySpawnConfig, 1),
-    };
-    game_levels[0].stages[0].enemy_configs[0] = shared.EnemySpawnConfig {
-        enemy_type = .GRUNT,
-        count = 1, // Test with a few grunts
-        min_spawn_delay = 0.5,
-        max_spawn_delay = 0.8,
-    };
+    // Wave 1: Grunts (Tutorial)
+    game_levels[0].stages[0] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 1) }
+    game_levels[0].stages[0].enemy_configs[0] = { enemy_type = .GRUNT, count = 3, min_spawn_delay = 1.0, max_spawn_delay = 2.0 }
 
-    // --- Level 1, Stage 2 ---
-    game_levels[0].stages[1] = shared.StageDefinition{
-        enemy_configs = make([]shared.EnemySpawnConfig, 2), // Two types of enemies in this stage
-    };
-    game_levels[0].stages[1].enemy_configs[0] = shared.EnemySpawnConfig {
-        enemy_type = .GRUNT,
-        count = 1, // More grunts
-        min_spawn_delay = 0.8,
-        max_spawn_delay = 2.0,
-    };
-    game_levels[0].stages[1].enemy_configs[1] = shared.EnemySpawnConfig {
-        enemy_type = .SLOWBOY,
-        count = 1, // A couple of slowboys
-        min_spawn_delay = 2.0,
-        max_spawn_delay = 4.0,
-    };
+    // Wave 2: Grunts (Tutorial)
+    game_levels[0].stages[1] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 1) }
+    game_levels[0].stages[1].enemy_configs[0] = { enemy_type = .GRUNT, count = 5, min_spawn_delay = 0.8, max_spawn_delay = 1.5 }
 
-    // --- Level 1, Stage 3 (Boss Stage) ---
-    // This stage uses the boss_config defined in the LevelDefinition.
-    game_levels[0].stages[2] = shared.StageDefinition{
-        enemy_configs = make([]shared.EnemySpawnConfig, 1),
-    };
-    // Assign the boss configuration to the enemy config of the boss stage.
-    game_levels[0].stages[2].enemy_configs[0] = game_levels[0].boss_config; 
+    // Wave 3: Grunts + Weavers
+    game_levels[0].stages[2] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 2) }
+    game_levels[0].stages[2].enemy_configs[0] = { enemy_type = .GRUNT, count = 5, min_spawn_delay = 1.0, max_spawn_delay = 2.0 }
+    game_levels[0].stages[2].enemy_configs[1] = { enemy_type = .WEAVER, count = 2, min_spawn_delay = 2.0, max_spawn_delay = 4.0 }
+
+    // Wave 4: Grunts + Weavers
+    game_levels[0].stages[3] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 2) }
+    game_levels[0].stages[3].enemy_configs[0] = { enemy_type = .GRUNT, count = 6, min_spawn_delay = 0.8, max_spawn_delay = 1.5 }
+    game_levels[0].stages[3].enemy_configs[1] = { enemy_type = .WEAVER, count = 4, min_spawn_delay = 1.5, max_spawn_delay = 3.0 }
+
+    // Wave 5: Gravitron + Mix
+    game_levels[0].stages[4] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 2) }
+    game_levels[0].stages[4].enemy_configs[0] = { enemy_type = .GRAVITRON, count = 1, min_spawn_delay = 1.0, max_spawn_delay = 1.0 }
+    game_levels[0].stages[4].enemy_configs[1] = { enemy_type = .GRUNT, count = 8, min_spawn_delay = 0.5, max_spawn_delay = 1.2 }
+
+    // Wave 6: Gravitron + Mix
+    game_levels[0].stages[5] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 3) }
+    game_levels[0].stages[5].enemy_configs[0] = { enemy_type = .GRAVITRON, count = 2, min_spawn_delay = 2.0, max_spawn_delay = 5.0 }
+    game_levels[0].stages[5].enemy_configs[1] = { enemy_type = .WEAVER, count = 4, min_spawn_delay = 1.0, max_spawn_delay = 3.0 }
+    game_levels[0].stages[5].enemy_configs[2] = { enemy_type = .SLOWBOY, count = 2, min_spawn_delay = 3.0, max_spawn_delay = 6.0 }
+
+    // Wave 7: Tracer Swarm (Elite)
+    game_levels[0].stages[6] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 1) }
+    game_levels[0].stages[6].enemy_configs[0] = { enemy_type = .TRACER, count = 15, min_spawn_delay = 0.2, max_spawn_delay = 0.6 }
+
+    // Wave 8: Boss Chrome Orb
+    game_levels[0].stages[7] = shared.StageDefinition{ enemy_configs = make([]shared.EnemySpawnConfig, 1) }
+    game_levels[0].stages[7].enemy_configs[0] = game_levels[0].boss_config;
 
     fmt.printf("--- Level Definitions Initialized: %d levels ---\n", len(game_levels));
     if len(game_levels) > 0 {
@@ -241,6 +263,68 @@ frame :: proc "c" () {
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
     state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);       // <<< NEW
     state.dash_cooldown_timer = math.max(0.0, state.dash_cooldown_timer - delta_time_f); // <<< NEW
+
+    // --- WAVE DIRECTOR LOGIC START ---
+    if state.game_state == .Playing {
+        // Check if level is complete (basic check for now, can be expanded)
+        all_enemies_spawned_wd := state.progression.active_stage.all_enemies_for_stage_spawned
+        all_enemies_dead_wd := (state.num_active_enemies == 0)
+
+        if all_enemies_spawned_wd && all_enemies_dead_wd {
+            state.wave_transition_timer += delta_time_f
+            if state.wave_transition_timer >= 3.0 {
+                // Wave Complete
+                state.wave_transition_timer = 0.0
+                state.surge_node.active = true // Spawn SurgeNode visual
+                state.surge_node.pos = {0,0} // Center screen
+                state.game_state = .LevelUp // Pause spawning, wait for interaction
+            }
+        }
+    } else if state.game_state == .LevelUp {
+        // Wait for player interaction (using SPACE for now) to advance
+        if state.key_shift_down { // Using SHIFT as generic "Interact" for now since space isn't tracked in global struct explicitly named space
+             // Advance Stage
+             // Check if there are more stages in this level
+             current_lvl_idx := state.progression.current_level_index
+             if current_lvl_idx < len(game_levels) {
+                next_stage_idx := state.progression.current_stage_index + 1
+                if next_stage_idx < len(game_levels[current_lvl_idx].stages) {
+                    load_and_initialize_stage_progression(current_lvl_idx, next_stage_idx)
+                    state.game_state = .Playing // Resume playing
+                    state.surge_node.active = false // Hide node
+                } else {
+                    // Level Complete! (Loop back to 0 or End Game)
+                    fmt.printf("LEVEL COMPLETE! Looping to start.\n")
+                    load_and_initialize_stage_progression(0, 0)
+                    state.game_state = .Playing
+                    state.surge_node.active = false
+                }
+             }
+        }
+    } else if state.game_state == .GameOver {
+        if state.key_w_down { // Pressing 'W' (or any key really, but let's say R is better, using existing key state for now)
+             // Reset Game
+             // We need to implement a reset_game() proc, but for now just basic reset variables
+             state.player_hp = state.player_max_hp
+             state.num_active_enemies = 0
+             state.num_active_particles = 0
+             state.num_active_blackholes = 0
+             state.player_pos = {0,0}
+             state.player_vel = {0,0}
+             load_and_initialize_stage_progression(0, 0)
+             state.game_state = .Playing
+             state.player_defeated_message_shown = false
+        }
+    }
+    // --- WAVE DIRECTOR LOGIC END ---
+
+    if state.player_hp <= 0 {
+        state.game_state = .GameOver
+        if !state.player_defeated_message_shown {
+            fmt.printf("!!! GAME OVER !!! PRESS R (mapped to W for now in code) TO RESTART\n")
+            state.player_defeated_message_shown = true
+        }
+    }
 
     update_player(delta_time_f)
 
@@ -315,6 +399,22 @@ frame :: proc "c" () {
         sg.apply_uniforms(UB_enemy_fs_params, sg.Range{ptr=&state.enemy_fs_params, size=size_of(shared.Enemy_Fs_Params)}) 
         sg.draw(0, 4, state.num_active_enemies)
     }
+
+    // --- UI Pass (DebugText) ---
+    if state.game_state == .GameOver {
+        sdtx.canvas(width_f, height_f)
+        sdtx.origin(width_f * 0.5 - 100, height_f * 0.5) // Roughly center
+        sdtx.color3b(255, 50, 50)
+        sdtx.puts("GAME OVER\nPRESS R TO RESTART") // Using R in text, though code listens to W/Shift for now
+        sdtx.draw()
+    } else if state.game_state == .LevelUp {
+        sdtx.canvas(width_f, height_f)
+        sdtx.origin(width_f * 0.5 - 120, height_f * 0.5)
+        sdtx.color3b(50, 255, 50)
+        sdtx.puts("WAVE COMPLETE\nPRESS SHIFT TO CONTINUE")
+        sdtx.draw()
+    }
+
     sg.end_pass(); sg.commit();
 }
 

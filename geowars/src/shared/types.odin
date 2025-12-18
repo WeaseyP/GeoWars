@@ -10,6 +10,9 @@ import "base:runtime"
 EnemyType :: enum {
     GRUNT,
     SLOWBOY,
+    WEAVER,
+    GRAVITRON,
+    TRACER,
     BOSS_CHROME_ORB,
 }
 
