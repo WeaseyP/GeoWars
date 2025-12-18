@@ -75,7 +75,6 @@ check_RMB_particle_enemy_collisions :: proc() {
                         if start_drum_err_rmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n"); } 
                         else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_rmb); }
                     }
-                    // (<<< NEW SYNTH TRIGGER START >>>)
                     if enemy_rmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
                         state.first_slowboy_killed = true;
                         start_synth_err := ma.sound_start(&state.synth_track_sound);
@@ -85,7 +84,6 @@ check_RMB_particle_enemy_collisions :: proc() {
                             fmt.eprintf("!!! ERROR: Failed to start synth_track_sound! Error: %v\n", start_synth_err);
                         }
                     }
-                    // (<<< NEW SYNTH TRIGGER END >>>)
                 }
                 break 
             }
@@ -149,7 +147,6 @@ check_LMB_projectile_enemy_collisions :: proc() {
                         if start_drum_err_lmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");} 
                         else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_lmb); }
                     }
-                    // (<<< NEW SYNTH TRIGGER START >>>)
                      if enemy_lmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
                         state.first_slowboy_killed = true;
                         start_synth_err := ma.sound_start(&state.synth_track_sound);
@@ -159,7 +156,6 @@ check_LMB_projectile_enemy_collisions :: proc() {
                             fmt.eprintf("!!! ERROR: Failed to start synth_track_sound! Error: %v\n", start_synth_err);
                         }
                     }
-                    // (<<< NEW SYNTH TRIGGER END >>>)
                 }
                 break 
             }

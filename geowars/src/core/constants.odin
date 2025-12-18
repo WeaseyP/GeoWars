@@ -86,12 +86,12 @@ ENEMY_BOSS_VISION_RANGE :: ORTHO_HEIGHT * 1.2; // Vision range - passed to shade
 ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0; // Seconds between detection prints
 ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4; // Vision rectangle width - passed to shader
 
-// NEW Laser Specifics (can be same as vision rect or different)
+// Laser Specifics (can be same as vision rect or different)
 BOSS_LASER_LENGTH :: ORTHO_HEIGHT;        // Length of the damaging laser beam
 BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5; // Make laser visually thinner than detection rect
 BOSS_LASER_DAMAGE :: 1;                                // Damage dealt by laser on contact (per collision check)
 ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0; // Multiplier for regular enemies
-BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT; // NEW: e.g., 4x screen height, should be plenty
+BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT; // e.g., 4x screen height, should be plenty
 
 
 SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2; 

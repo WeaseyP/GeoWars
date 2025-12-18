@@ -126,7 +126,7 @@ handle_player_input :: proc(event: ^sapp.Event) {
         case .S: state.key_s_down=true; 
         case .A: state.key_a_down=true; 
         case .D: state.key_d_down=true; 
-        case .LEFT_SHIFT: state.key_shift_down = true; // <<< NEW
+        case .LEFT_SHIFT: state.key_shift_down = true;
         case .ESCAPE: sapp.request_quit(); 
     }
     case .KEY_UP: #partial switch event.key_code { 
@@ -134,7 +134,7 @@ handle_player_input :: proc(event: ^sapp.Event) {
         case .S: state.key_s_down=false; 
         case .A: state.key_a_down=false; 
         case .D: state.key_d_down=false; 
-        case .LEFT_SHIFT: state.key_shift_down = false; // <<< NEW
+        case .LEFT_SHIFT: state.key_shift_down = false;
     }
     case .MOUSE_DOWN: 
         if event.mouse_button == .RIGHT { state.rmb_down = true }
@@ -257,7 +257,11 @@ check_player_enemy_collisions :: proc() {
             state.player_hp = math.max(state.player_hp, 0) 
             state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION
             fmt.printf("Player hit by ENEMY! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-            // TODO: Specific sound for player getting hit
+
+            // Play hit sound (using LMB hit sound as placeholder)
+            ma.sound_seek_to_pcm_frame(&state.lmb_hit_sound, 0);
+            ma.sound_start(&state.lmb_hit_sound);
+
             break 
         }
     }

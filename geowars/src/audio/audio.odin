@@ -506,7 +506,6 @@ init_audio :: proc() {
         fmt.eprintf("!!! CRITICAL: Drum Track audio_buffer_init_copy failed! Error: %v\n", init_drum_track_ab_result)
     }
 
-    // (<<< NEW SYNTH TRACK INITIALIZATION START >>>)
     fmt.printf("--- Generating Heavy Fast Synth Track PCM data (160 BPM)... ---\n");
 
     SYNTH_TRACK_SECONDS_PER_BEAT_CALC : f32 = 60.0 / SYNTH_TRACK_BPM; // Renamed to avoid conflict if used elsewhere

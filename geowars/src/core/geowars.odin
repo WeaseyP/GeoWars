@@ -52,10 +52,10 @@ state: struct {
     rmb_hit_sound: ma.sound,
     rmb_kill_sound: ma.sound,
     drum_track_sound: ma.sound,
-    synth_track_sound: ma.sound, // <<< NEW
+    synth_track_sound: ma.sound,
 
     first_grunt_killed: bool, 
-    first_slowboy_killed: bool, // <<< NEW
+    first_slowboy_killed: bool,
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int, 
     player_invulnerable_timer: f32,   
@@ -137,7 +137,7 @@ init :: proc "c" () {
     state.slowboy_spawn_timer = 5.0; 
 
     state.first_grunt_killed = false;
-    state.first_slowboy_killed = false; // <<< NEW
+    state.first_slowboy_killed = false;
 
     // --- Initialize Level Definitions ---
     fmt.printf("--- Initializing Level Definitions ---\n");
@@ -239,8 +239,8 @@ frame :: proc "c" () {
     state.player_invulnerable_timer = math.max(0.0, state.player_invulnerable_timer - delta_time_f);
     state.rmb_cooldown_timer = math.max(0.0, state.rmb_cooldown_timer - delta_time_f)
     state.lmb_cooldown_timer = math.max(0.0, state.lmb_cooldown_timer - delta_time_f)
-    state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);       // <<< NEW
-    state.dash_cooldown_timer = math.max(0.0, state.dash_cooldown_timer - delta_time_f); // <<< NEW
+    state.dash_timer = math.max(0.0, state.dash_timer - delta_time_f);
+    state.dash_cooldown_timer = math.max(0.0, state.dash_cooldown_timer - delta_time_f);
 
     update_player(delta_time_f)
 
@@ -322,34 +322,32 @@ frame :: proc "c" () {
 cleanup :: proc "c" () { 
     context=runtime.default_context(); 
     
-    ma.sound_uninit(&state.lmb_sound); fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
-    ma.audio_buffer_uninit(&lmb_sound_audio_buffer); fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
+    ma.sound_uninit(&state.lmb_sound);
+    ma.audio_buffer_uninit(&lmb_sound_audio_buffer);
 
-    ma.audio_buffer_uninit(&rmb_hum_audio_buffer); fmt.printf("--- RMB Hum global audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer); fmt.printf("--- RMB Whoosh global audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&rmb_hum_audio_buffer);
+    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer);
 
-    ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); fmt.printf("--- Enemy Hit audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); fmt.printf("--- Enemy Death audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer);
+    ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer);
 
-    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
-    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer);
+    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer);
     
-    delete(drum_track_pcm_data); fmt.printf("--- Drum track PCM data slice deleted ---\n");
-    ma.audio_buffer_uninit(&drum_track_audio_buffer); fmt.printf("--- Drum Track audio_buffer uninitialized ---\n");
+    delete(drum_track_pcm_data);
+    ma.audio_buffer_uninit(&drum_track_audio_buffer);
 
-    // (<<< NEW SYNTH CLEANUP START >>>)
-    delete(synth_track_pcm_data); fmt.printf("--- Synth track PCM data slice deleted ---\n");
-    ma.audio_buffer_uninit(&synth_track_audio_buffer); fmt.printf("--- Synth Track audio_buffer uninitialized ---\n");
-    // (<<< NEW SYNTH CLEANUP END >>>)
+    delete(synth_track_pcm_data);
+    ma.audio_buffer_uninit(&synth_track_audio_buffer);
 
-    ma.sound_uninit(&state.lmb_hit_sound); fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n");
-    ma.sound_uninit(&state.lmb_kill_sound); fmt.printf("--- Miniaudio lmb_kill_sound uninitialized ---\n");
-    ma.sound_uninit(&state.rmb_hit_sound); fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n");
-    ma.sound_uninit(&state.rmb_kill_sound); fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n");
-    ma.sound_uninit(&state.drum_track_sound); fmt.printf("--- Miniaudio drum_track_sound uninitialized ---\n");
-    ma.sound_uninit(&state.synth_track_sound); fmt.printf("--- Miniaudio synth_track_sound uninitialized ---\n"); // <<< NEW
+    ma.sound_uninit(&state.lmb_hit_sound);
+    ma.sound_uninit(&state.lmb_kill_sound);
+    ma.sound_uninit(&state.rmb_hit_sound);
+    ma.sound_uninit(&state.rmb_kill_sound);
+    ma.sound_uninit(&state.drum_track_sound);
+    ma.sound_uninit(&state.synth_track_sound);
 
-    ma.engine_uninit(&state.audio_engine); fmt.printf("--- Miniaudio engine uninitialized ---\n")
+    ma.engine_uninit(&state.audio_engine);
     if sa.isvalid() { sa.shutdown(); fmt.printf("--- Sokol Audio shutdown ---\n") }
     sg.shutdown(); 
 }
