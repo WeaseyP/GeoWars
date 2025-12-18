@@ -1,4 +1,4 @@
-package main
+package shared
 import sg "../vendor/sokol/gfx"
 import m "../vendor/math"
 /*
