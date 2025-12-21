@@ -9,7 +9,7 @@ import "core:fmt"
 import "core:math"
 
 // Constants
-PARTICLE_DAMAGE_VALUE :: 1
+PARTICLE_DAMAGE_VALUE :: 5
 LMB_PROJECTILE_DAMAGE :: 2
 ENEMY_GRUNT_DAMAGE_VALUE :: 1
 SLOWBOY_ATTACK_DAMAGE :: 1
@@ -131,7 +131,7 @@ check_LMB_projectile_enemy_collisions :: proc(state: ^shared.GameState, proj_mgr
 check_player_enemy_collisions :: proc(state: ^shared.GameState) {
     if state.player.hp <= 0 || state.player.invulnerable_timer > 0.0 { return }
 
-    p_rad := shared.PLAYER_CORE_WORLD_RADIUS
+    p_rad : f32 = shared.PLAYER_CORE_WORLD_RADIUS
 
     for i in 0..<shared.MAX_ENEMIES {
         e := &state.enemies[i]
@@ -159,6 +159,19 @@ check_player_enemy_collisions :: proc(state: ^shared.GameState) {
 handle_enemy_death :: proc(state: ^shared.GameState, e: ^shared.Enemy) {
     e.is_dying = true
     state.progression.enemies_defeated_in_current_stage += 1
+    
+    // Score
+    score_val := 0
+    switch e.type {
+        case .GRUNT: score_val = 100
+        case .SLOWBOY: score_val = 300
+        case .WEAVER: score_val = 500
+        case .GRAVITRON: score_val = 800
+        case .TRACER: score_val = 600
+        case .ELITE: score_val = 1500
+        case .BOSS_CHROME_ORB: score_val = 10000
+    }
+    state.score += score_val
 
     if e.type == .GRUNT { e.dying_timer = GRUNT_DEATH_ANIM_DURATION; e.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION }
     else if e.type == .BOSS_CHROME_ORB { e.dying_timer = BOSS_DEATH_ANIM_DURATION; e.death_anim_max_duration = BOSS_DEATH_ANIM_DURATION }

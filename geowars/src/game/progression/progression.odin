@@ -70,8 +70,9 @@ handle_enemy_spawning :: proc(game_state: ^shared.GameState, dt: f32) {
                     if spawn_state.spawn_timer <= 0.0 {
                         config := &current_stage_def.enemy_configs[spawn_state.config_index]
 
-                        width := shared.ORTHO_HEIGHT * (sapp.widthf() / sapp.heightf())
-                        enemy.spawn_enemy(game_state, width, shared.ORTHO_HEIGHT, game_state.player.pos, config.enemy_type)
+                        width := f32(shared.ARENA_WIDTH)
+                        height := f32(shared.ARENA_HEIGHT)
+                        enemy.spawn_enemy(game_state, width, height, game_state.player.pos, config.enemy_type)
 
                         spawn_state.remaining_to_spawn -= 1
                         spawn_state.spawned_count += 1
@@ -108,7 +109,7 @@ load_stage :: proc(game_state: ^shared.GameState, level_idx: int, stage_idx: int
     for config, idx in stage_def.enemy_configs {
         append(&game_state.progression.active_stage.enemy_spawn_states, shared.ActiveStageEnemySpawnState{
             config_index = idx,
-            spawn_timer = rand.float32_range(config.min_spawn_delay, config.max_spawn_delay),
+            spawn_timer = config.start_delay + rand.float32_range(config.min_spawn_delay, config.max_spawn_delay),
             remaining_to_spawn = config.count,
         })
         total_enemies += config.count

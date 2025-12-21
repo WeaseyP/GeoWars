@@ -19,12 +19,12 @@ ENEMY_WANDER_INFLUENCE :: 0.35
 ENEMY_BOSS_SPAWN_Y_OFFSET :: 1.125 // 1.5 * 0.75
 
 // Stats
-ENEMY_GRUNT_SPEED :: 0.5
-ENEMY_SLOWBOY_SPEED :: 0.15
-ENEMY_WEAVER_SPEED :: 0.6
-ENEMY_GRAVITRON_SPEED :: 0.2
-ENEMY_TRACER_SPEED :: 2.5
-ENEMY_ELITE_SPEED :: 0.7
+ENEMY_GRUNT_SPEED :: 0.75
+ENEMY_SLOWBOY_SPEED :: 0.22
+ENEMY_WEAVER_SPEED :: 1.8
+ENEMY_GRAVITRON_SPEED :: 0.3
+ENEMY_TRACER_SPEED :: 3.75
+ENEMY_ELITE_SPEED :: 1.05
 
 ENEMY_GRUNT_HP :: 4
 ENEMY_SLOWBOY_HP :: 16
@@ -78,35 +78,35 @@ spawn_enemy :: proc(game_state: ^shared.GameState, width: f32, height: f32, play
 
     switch type {
         case .GRUNT:
-            target_size = 0.2
+            target_size = 0.3
             hp = ENEMY_GRUNT_HP
             color = {0.9, 0.1, 0.7, 0.65}
             ang_vel = 2.0
         case .SLOWBOY:
-            target_size = 0.25
+            target_size = 0.38
             hp = ENEMY_SLOWBOY_HP
             color = {0.3, 0.7, 0.9, 0.65}
             ang_vel = 1.0
         case .WEAVER:
-            target_size = 0.18
+            target_size = 0.27
             hp = ENEMY_WEAVER_HP
             color = {0.1, 0.9, 0.3, 0.8}
             ang_vel = 0.0 // Aligned to movement
         case .GRAVITRON:
-            target_size = 0.3
+            target_size = 0.45
             hp = ENEMY_GRAVITRON_HP
             color = {0.2, 0.2, 0.8, 0.9}
             ang_vel = 0.5
         case .TRACER:
-            target_size = 0.15
+            target_size = 0.3
             hp = ENEMY_TRACER_HP
-            color = {1.0, 0.5, 0.0, 0.8}
+            color = {0.9, 0.7, 0.1, 0.8}
             ang_vel = 0.0
         case .ELITE:
-            target_size = 0.25
+            target_size = 0.45
             hp = ENEMY_ELITE_HP
-            color = {1.0, 0.8, 0.1, 0.9}
-            ang_vel = 3.0
+            color = {0.9, 0.1, 0.1, 0.9}
+            ang_vel = 0.8
         case .BOSS_CHROME_ORB:
             target_size = 0.2 // Boss scaling handled in shader or special Logic
             hp = ENEMY_BOSS_HP
@@ -136,11 +136,11 @@ update_and_instance_enemies :: proc(game_state: ^shared.GameState, dt: f32) -> i
             e.death_rect_offset += 0.3 * dt
             if e.dying_timer <= 0.0 { e.active = false; continue }
             // Scale down effect
-            progress := 1.0
+            progress : f32 = 1.0
             if e.death_anim_max_duration > 0.001 {
                 progress = e.dying_timer / e.death_anim_max_duration
             }
-            e.current_size = m.lerp(0.0, e.target_size, progress)
+            e.current_size = m.lerp(f32(0.0), e.target_size, progress)
         } else if e.is_growing {
             e.grow_timer -= dt
             if e.grow_timer <= 0.0 {
@@ -166,7 +166,7 @@ update_and_instance_enemies :: proc(game_state: ^shared.GameState, dt: f32) -> i
                         e.wander_timer = ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL
                     }
                     move_dir := m.norm_vec2(dir_to_player + e.current_wander_vector * ENEMY_WANDER_INFLUENCE)
-                    speed := (e.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_ELITE_SPEED)
+                    speed : f32 = (e.type == .GRUNT ? ENEMY_GRUNT_SPEED : ENEMY_ELITE_SPEED)
                     e.vel = move_dir * speed
                     e.rotation += e.angular_vel * dt
 
@@ -201,19 +201,22 @@ update_and_instance_enemies :: proc(game_state: ^shared.GameState, dt: f32) -> i
                     // Sine wave movement
                     // Orthogonal vector
                     ortho := m.vec2{-dir_to_player.y, dir_to_player.x}
-                    sine_val := math.sin(f32(sapp.frame_count()) * 0.1)
-                    e.vel = (dir_to_player * 0.5 + ortho * sine_val * 0.8) * ENEMY_WEAVER_SPEED
+                    sine_val := math.sin(f32(sapp.frame_count()) * 0.2)
+                    e.vel = (dir_to_player * 0.5 + ortho * sine_val * 4.5) * ENEMY_WEAVER_SPEED
                     e.rotation = math.atan2(e.vel.y, e.vel.x) // Face movement
 
                 case .GRAVITRON:
-                    // Pull player
+                    // Pull player logic moved to "Single Closest Lock"
                     e.vel = dir_to_player * ENEMY_GRAVITRON_SPEED
                     e.rotation -= e.angular_vel * dt
-                    if dist_sq < 2.0 { // Gravity range
-                        pull_strength := (2.0 - dist_sq) * 2.0 // stronger when closer
-                        // Modifying player velocity from here is tricky but we have GameState pointer
-                        pull_vec := m.norm_vec2(e.pos - player_pos) * pull_strength * dt
-                        game_state.player.vel += pull_vec
+                    
+                    // Check logic for closest
+                    GRAVITRON_RANGE_SQ :: 100.0 // Half map (approx 10 units) squared
+                    if dist_sq < GRAVITRON_RANGE_SQ {
+                         if dist_sq < game_state.closest_gravitron_dist_sq {
+                             game_state.closest_gravitron_dist_sq = dist_sq
+                             game_state.closest_gravitron_pos = e.pos
+                         }
                     }
 
                 case .TRACER:
@@ -266,10 +269,10 @@ update_and_instance_enemies :: proc(game_state: ^shared.GameState, dt: f32) -> i
                 case .SLOWBOY: type_id = 1.0
                 case .BOSS_CHROME_ORB: type_id = 2.0
                 // Add mapping for new types (reuse grunt or new IDs if shader updated)
-                case .WEAVER: type_id = 0.0 // Reuse grunt shape for now or update shader
-                case .GRAVITRON: type_id = 1.0 // Reuse slowboy shape
-                case .TRACER: type_id = 0.0
-                case .ELITE: type_id = 0.0
+                case .WEAVER: type_id = 3.0
+                case .GRAVITRON: type_id = 4.0
+                case .TRACER: type_id = 5.0
+                case .ELITE: type_id = 6.0
             }
             inst.instance_enemy_type = type_id
             

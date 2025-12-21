@@ -7,7 +7,7 @@ import m "../../vendor/math"
 import shared "../../shared"
 
 MAX_BLACKHOLES :: 64
-PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 5.0
+PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 12.0 // Boosted for pace (was 5.0, user requested faster)
 PROJECTILE_BLACKHOLE_LIFETIME :: 3.0
 PROJECTILE_BLACKHOLE_SCALE :: 0.12
 

@@ -19,8 +19,8 @@ SWIRL_SPEED_INWARD_INITIAL  :: -0.1
 SWIRL_PARTICLE_SIZE_BASE    :: 0.03
 SWIRL_PARTICLE_SIZE_RAND    :: 0.01
 SWIRL_CLOUD_TRAVEL_FACTOR   :: 0.0
-SWIRL_CLOUD_BASE_PUSH       :: 0.15
-DEATH_BURST_PARTICLE_COUNT  :: 150
+SWIRL_CLOUD_BASE_PUSH       :: 0.25 // Boosted push
+DEATH_BURST_PARTICLE_COUNT  :: 300 // Boosted density
 
 RMB_HUM_AMPLITUDE :: 0.1
 RMB_WHOOSH_AMPLITUDE :: 0.25
@@ -60,12 +60,34 @@ emit_particle :: proc(game_state: ^shared.GameState, part: shared.Particle) {
     game_state.next_particle_index = (game_state.next_particle_index + 1) % shared.MAX_PARTICLES
 }
 
+spawn_muzzle_flash :: proc(game_state: ^shared.GameState, pos: m.vec2, dir: m.vec2) {
+    // Quick burst of particles along direction
+    count := 5
+    for i in 0..<count {
+        angle := math.atan2(dir.y, dir.x) + (rand.float32() * 0.5 - 0.25)
+        speed := 2.0 + rand.float32() * 3.0
+        vel := m.vec2{math.cos(angle), math.sin(angle)} * speed
+        
+        p := shared.Particle{
+            pos = pos,
+            vel = vel,
+            color = {1.0, 0.9, 0.5, 1.0},
+            size = 0.15,
+            life_remaining = 0.1,
+            life_max = 0.1,
+            drag = 0.0,
+            active = true,
+        }
+        emit_particle(game_state, p)
+    }
+}
+
 spawn_swirling_charge :: proc(game_state: ^shared.GameState) {
     if game_state.player.hp <= 0 { return }
 
     charge_center := game_state.player.pos
     charge_duration := SWIRL_CHARGE_DURATION_BASE + rand.float32() * SWIRL_CHARGE_DURATION_RAND
-    start_size_base := SWIRL_PARTICLE_SIZE_BASE
+    start_size_base : f32 = SWIRL_PARTICLE_SIZE_BASE
     start_size_rand := SWIRL_PARTICLE_SIZE_RAND
     start_color := m.vec4{0.8, 0.3, 1.0, 1.0}
 
@@ -75,7 +97,7 @@ spawn_swirling_charge :: proc(game_state: ^shared.GameState) {
     }
     
     for _ in 0..<DEATH_BURST_PARTICLE_COUNT {
-        start_size := start_size_base + rand.float32() * start_size_rand
+        start_size := start_size_base + rand.float32() * f32(start_size_rand)
         spawn_angle := rand.float32() * f32(m.TAU)
         spawn_dist := rand.float32() * SWIRL_RADIUS_SPAWN
 

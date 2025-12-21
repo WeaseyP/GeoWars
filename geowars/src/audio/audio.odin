@@ -1,14 +1,14 @@
 package audio
 
-import ma "../../vendor/miniaudio"
-import m "../../vendor/math"
+import ma "../vendor/miniaudio"
+import m "../vendor/math"
 import "core:math"
 import "core:fmt"
-import sa "../../vendor/sokol/audio"
+import sa "../vendor/sokol/audio"
 import rand "core:math/rand"
 import "base:runtime"
 import "core:c"
-import shared "../../shared"
+import shared "../shared"
 
 // --- Global Variables and Constants (Internal to audio package) ---
 
@@ -240,7 +240,7 @@ init_audio :: proc(state: ^shared.GameState) {
         progress := f64(i) / f64(ENEMY_HIT_SOUND_FRAMES)
         amp: f64
         attack := 0.1
-        if progress < attack { amp = progress / attack } else { amp = 1.0 - (progress - attack) / (1.0 - attack) }
+        if progress < attack { amp = f64(progress) / attack } else { amp = 1.0 - (f64(progress) - attack) / (1.0 - attack) }
         amp = math.max(0.0, amp)
         ratio := ENEMY_HIT_SOUND_END_FREQ / ENEMY_HIT_SOUND_START_FREQ
         freq := f64(ENEMY_HIT_SOUND_START_FREQ) * math.pow(f64(ratio), progress)
@@ -261,7 +261,8 @@ init_audio :: proc(state: ^shared.GameState) {
         if i < ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES {
             progress := f32(i) / f32(ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES)
             decay := math.max(0.0, 1.0 - progress)
-            sample := (rand.float32(&death_rng) * 2.0 - 1.0)
+            gen := rand.default_random_generator(&death_rng)
+            sample := (rand.float32(gen) * 2.0 - 1.0)
             enemy_death_sound_pcm_data[i] = sample * ENEMY_DEATH_SOUND_NOISE_AMPLITUDE * decay
         } else {
             sine_idx := i - ENEMY_DEATH_SOUND_NOISE_DURATION_FRAMES
@@ -286,10 +287,11 @@ init_audio :: proc(state: ^shared.GameState) {
     for i in 0..<LMB_HIT_WHOOSH_DURATION_FRAMES {
         progress := f32(i) / f32(LMB_HIT_WHOOSH_DURATION_FRAMES)
         amp: f32
-        attack := 0.05
+        attack : f32 = 0.05
         if progress < attack { amp = progress / attack } else { amp = 1.0 - (progress - attack) / 0.95 }
         amp = math.max(0.0, amp)
-        sample := (rand.float32(&lmb_hit_rng) * 2.0 - 1.0)
+        gen := rand.default_random_generator(&lmb_hit_rng)
+        sample := (rand.float32(gen) * 2.0 - 1.0)
         lmb_hit_whoosh_pcm_data[i] = sample * LMB_HIT_WHOOSH_AMPLITUDE * amp
     }
 
@@ -307,7 +309,8 @@ init_audio :: proc(state: ^shared.GameState) {
         if i < EXP_NOISE {
             progress := f32(i) / f32(EXP_NOISE)
             decay := math.pow(1.0 - progress, 2.0)
-            sample := (rand.float32(&lmb_kill_rng) * 2.0 - 1.0)
+            gen := rand.default_random_generator(&lmb_kill_rng)
+            sample := (rand.float32(gen) * 2.0 - 1.0)
             lmb_kill_explosion_pcm_data[i] = sample * LMB_KILL_EXPLOSION_AMPLITUDE * decay * 0.7
         } else {
             sine_idx := i - EXP_NOISE
@@ -408,6 +411,7 @@ init_audio :: proc(state: ^shared.GameState) {
     ma.sound_init_from_data_source(&state.audio_engine, (^ma.data_source)(&synth_track_audio_buffer), { .NO_PITCH, .NO_SPATIALIZATION }, nil, &state.synth_track_sound);
     ma.sound_set_looping(&state.synth_track_sound, true);
     ma.sound_set_volume(&state.synth_track_sound, 1.0);
+    ma.sound_start(&state.synth_track_sound)
 
 }
 

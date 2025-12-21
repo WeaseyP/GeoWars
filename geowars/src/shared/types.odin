@@ -11,8 +11,37 @@ MAX_PARTICLES :: 2048
 MAX_ENEMIES :: 128
 MAX_BLACKHOLES :: 64
 PLAYER_DASH_TRAIL_LENGTH :: 4
-ORTHO_HEIGHT :: 1.5
-PLAYER_CORE_WORLD_RADIUS :: 0.012 // Approx, was calculated: (0.04 / 0.5) * 0.15 = 0.012
+
+// World Constants
+ORTHO_HEIGHT :: 7.0 // Zoomed in from 10.0 to make entities bigger and speed feel faster
+// Arena Size (World Space)
+ARENA_WIDTH  :: 30.0 
+ARENA_HEIGHT :: 20.0
+ARENA_CORNER_CUT :: 8.0 // Matches shader logic
+ARENA_RADIUS :: 18.0 // For Octagon logic closer to edges
+
+PLAYER_SCALE :: 0.6
+PLAYER_SPEED :: 12.0 // Cap max speed
+PLAYER_ACCEL :: 45.0 // Acceleration force
+PLAYER_FRICTION :: 4.0 // Damping factor
+PLAYER_ROTATION_SPEED :: 15.0 // Lerp speed for rotation
+PLAYER_CORE_WORLD_RADIUS :: 0.22 
+
+// Arena
+ARENA_HEX_RADIUS :: 13.0 // Size of Hexagon
+
+
+
+// --- Camera Struct ---
+Camera :: struct {
+    pos: m.vec2,
+    target_pos: m.vec2,
+    zoom: f32,
+    target_zoom: f32,
+    shake_offset: m.vec2,
+    shake_duration: f32,
+    shake_intensity: f32,
+}
 
 // --- Enemy Type Enum ---
 EnemyType :: enum {
@@ -29,6 +58,7 @@ EnemyType :: enum {
 Player :: struct {
     pos: m.vec2,
     vel: m.vec2,
+    rotation: f32,
     hp: int,
     max_hp: int,
     invulnerable_timer: f32,
@@ -55,6 +85,7 @@ Particle :: struct {
     color:            m.vec4,
     size:             f32,
     start_size:       f32,
+    drag:             f32,
     life_remaining:   f32,
     life_max:         f32,      
     swirl_duration:   f32,      
@@ -104,6 +135,7 @@ EnemySpawnConfig :: struct {
     count: int,
     min_spawn_delay: f32,
     max_spawn_delay: f32,
+    start_delay: f32,
 }
 
 StageDefinition :: struct {
@@ -198,8 +230,12 @@ GameState :: struct {
     bg_pip: sg.Pipeline,
     player_pip: sg.Pipeline,
     particle_pip: sg.Pipeline,
+    line_pip: sg.Pipeline, // For Grid
     enemy_pip: sg.Pipeline,
     blackhole_pip: sg.Pipeline,
+
+    // Bindings
+    line_bind: sg.Bindings, // For Grid VBO
 
     // Shader Params - assuming defined in shader.odin in package shared
     bg_fs_params: Bg_Fs_Params,
@@ -248,4 +284,20 @@ GameState :: struct {
 
     grunt_spawn_timer: f32,
     slowboy_spawn_timer: f32,
+
+    // Gravitron Logic State
+    closest_gravitron_dist_sq: f32,
+    closest_gravitron_pos: m.vec2,
+    
+    score: int,
+
+    // Camera
+    camera: Camera,
 }
+
+Vertex :: struct {
+    pos: m.vec3,
+    color: m.vec4,
+}
+
+// Camera definition removed (duplicate)
