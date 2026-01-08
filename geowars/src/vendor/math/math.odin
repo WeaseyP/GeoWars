@@ -1,10 +1,3 @@
-//------------------------------------------------------------------------------
-//  math.odin
-//
-//  The Odin glsl math package doesn't use the same conventions as
-//  HandmadeMath in the original sokol samples, so just replicate
-//  HandmadeMath to be consistent.
-//------------------------------------------------------------------------------
 package sokol_math
 
 import "core:math"
@@ -23,8 +16,10 @@ up :: proc () -> vec3 { return { 0.0, 1.0, 0.0 } }
 
 dot :: proc{
     dot_vec3,
+    dot_vec2,
 }
 dot_vec3 :: proc(v0, v1: vec3) -> f32 { return v0.x*v1.x + v0.y*v1.y + v0.z*v1.z }
+dot_vec2 :: proc(v0, v1: vec2) -> f32 { return v0.x*v1.x + v0.y*v1.y }
 
 len :: proc{
     len_vec3,
@@ -98,155 +93,115 @@ persp_mat4 :: proc(fov, aspect, near, far: f32) -> mat4 {
 }
 lerp :: proc "contextless" (a, b: $T, t: $E) -> (x: T) {
     // Ensure T supports multiplication with (1-t) and t, and addition.
-    // Ensure E can be subtracted from 1.
-    // For f32, this works perfectly.
-    return a*(1-t) + f32(b)*t;
+    // For scalar types, this is trivially true.
+    // For vector types, they should support element-wise operations.
+    // The implementation assumes standard lerp behavior: a * (1 - t) + b * t
+    return a * (1 - t) + b * t
 }
 
-lookat :: proc {
-    lookat_mat4,
+translate :: proc(v: vec3) -> mat4 {
+    m := identity()
+    m[3][0] = v.x
+    m[3][1] = v.y
+    m[3][2] = v.z
+    return m
 }
-lookat_mat4 :: proc(eye, center, up: vec3) -> mat4 {
-    m := mat4 {}
-    f := norm(center - eye)
-    s := norm(cross(f, up))
-    u := cross(s, f)
-
+scale :: proc(s: vec3) -> mat4 {
+    m := identity()
     m[0][0] = s.x
-    m[0][1] = u.x
-    m[0][2] = -f.x
+    m[1][1] = s.y
+    m[2][2] = s.z
+    return m
+}
+rotate :: proc(angle: f32, v: vec3) -> mat4 {
+    c := math.cos(angle)
+    s := math.sin(angle)
+    axis := norm(v)
+    t := 1.0 - c
 
-    m[1][0] = s.y
-    m[1][1] = u.y
-    m[1][2] = -f.y
+    m : mat4 = {}
+    m[0][0] = t * axis.x * axis.x + c
+    m[0][1] = t * axis.x * axis.y + s * axis.z
+    m[0][2] = t * axis.x * axis.z - s * axis.y
+    m[0][3] = 0.0
 
-    m[2][0] = s.z
-    m[2][1] = u.z
-    m[2][2] = -f.z
+    m[1][0] = t * axis.x * axis.y - s * axis.z
+    m[1][1] = t * axis.y * axis.y + c
+    m[1][2] = t * axis.y * axis.z + s * axis.x
+    m[1][3] = 0.0
 
-    m[3][0] = -dot(s, eye)
-    m[3][1] = -dot(u, eye)
-    m[3][2] = dot(f, eye)
+    m[2][0] = t * axis.x * axis.z + s * axis.y
+    m[2][1] = t * axis.y * axis.z - s * axis.x
+    m[2][2] = t * axis.z * axis.z + c
+    m[2][3] = 0.0
+
+    m[3][0] = 0.0
+    m[3][1] = 0.0
+    m[3][2] = 0.0
     m[3][3] = 1.0
 
     return m
 }
-hash11 :: proc(p: f32) -> f32 {
-    // GLSL: fract(sin(p * 78.233) * 43758.5453);
-    h := math.sin(p * 78.233) * 43758.5453;
-    return h - math.floor(h); // Odin equivalent of fract()
-}
 
-rotate :: proc{
-    rotate_mat4,
-}
-rotate_mat4 :: proc (angle: f32, axis_unorm: vec3) -> mat4 {
+lookat :: proc(eye, center, up: vec3) -> mat4 {
+    f := norm(center - eye)
+    s := norm(cross(f, up))
+    u := cross(s, f)
+
     m := identity()
-
-    axis := norm(axis_unorm)
-    sin_theta := math.sin(radians(angle))
-    cos_theta := math.cos(radians(angle))
-    cos_value := 1.0 - cos_theta;
-
-    m[0][0] = (axis.x * axis.x * cos_value) + cos_theta
-    m[0][1] = (axis.x * axis.y * cos_value) + (axis.z * sin_theta)
-    m[0][2] = (axis.x * axis.z * cos_value) - (axis.y * sin_theta)
-    m[1][0] = (axis.y * axis.x * cos_value) - (axis.z * sin_theta)
-    m[1][1] = (axis.y * axis.y * cos_value) + cos_theta
-    m[1][2] = (axis.y * axis.z * cos_value) + (axis.x * sin_theta)
-    m[2][0] = (axis.z * axis.x * cos_value) + (axis.y * sin_theta)
-    m[2][1] = (axis.z * axis.y * cos_value) - (axis.x * sin_theta)
-    m[2][2] = (axis.z * axis.z * cos_value) + cos_theta
-
-    return m
-}
-// Add this procedure for Orthographic Projection
-ortho :: proc {
-    ortho_mat4,
-}
-ortho_mat4 :: proc (left, right, bottom, top, near, far: f32) -> mat4 {
-    m := identity() // Start with identity
-
-    // Calculate differences
-    rl := right - left
-    tb := top - bottom
-    fn := far - near
-
-    // Set the specific elements for orthographic projection
-    // Assuming column-major layout as suggested by mul_mat4
-    m[0][0] = 2.0 / rl
-    m[1][1] = 2.0 / tb
-    m[2][2] = -2.0 / fn // Use -2.0 for right-handed coords (like OpenGL/Sokol default)
-    m[3][0] = -(right + left) / rl
-    m[3][1] = -(top + bottom) / tb
-    m[3][2] = -(far + near) / fn
-    // m[3][3] remains 1.0 from identity
-
-    return m
-}
-vec2_zero :: proc() -> vec2 { return {0.0, 0.0} }
-
-dot_vec2 :: proc(a, b: vec2) -> f32 {
-    return a.x * b.x + a.y * b.y
-}
-
-len_sq_vec2 :: proc(v: vec2) -> f32 { // Length squared (cheaper than len)
-    return dot_vec2(v, v)
-}
-
-len_vec2 :: proc(v: vec2) -> f32 {
-    return math.sqrt(len_sq_vec2(v))
-}
-
-norm_vec2 :: proc(v: vec2) -> vec2 { // Normalize
-    l := len_vec2(v)
-    if l > 0.00001 { // Avoid division by zero
-        inv_l := 1.0 / l
-        return v * inv_l
-    } else {
-        return {0.0, 0.0}
-    }
-}
-
-// Add this procedure for Scaling
-scale :: proc {
-    scale_mat4,
-}
-scale_mat4 :: proc (v: vec3) -> mat4 {
-    m := identity() // Start with identity
-
-    // Set diagonal elements for scaling
-    m[0][0] = v.x
-    m[1][1] = v.y
-    m[2][2] = v.z
-    // m[3][3] remains 1.0 from identity
-
+    m[0][0] = s.x
+    m[1][0] = s.y
+    m[2][0] = s.z
+    m[0][1] = u.x
+    m[1][1] = u.y
+    m[2][1] = u.z
+    m[0][2] = -f.x
+    m[1][2] = -f.y
+    m[2][2] = -f.z
+    m[3][0] = -dot(s, eye)
+    m[3][1] = -dot(u, eye)
+    m[3][2] = dot(f, eye)
+    
     return m
 }
 
-translate :: proc{
-    translate_mat4,
-}
-translate_mat4 :: proc (translation: vec3) -> mat4 {
-    m := identity()
-    m[3][0] = translation.x
-    m[3][1] = translation.y
-    m[3][2] = translation.z
-    return m
-}
-
-mul :: proc{
-    mul_mat4,
-}
-mul_mat4 :: proc (left, right: mat4) -> mat4 {
-    m := mat4 {}
-    for col := 0; col < 4; col += 1 {
-        for row := 0; row < 4; row += 1 {
-            m[col][row] = left[0][row] * right[col][0] +
-                          left[1][row] * right[col][1] +
-                          left[2][row] * right[col][2] +
-                          left[3][row] * right[col][3];
+mul :: proc(m0, m1: mat4) -> mat4 {
+    m : mat4 = {}
+    for i in 0..<4 {
+        for j in 0..<4 {
+            m[i][j] = m0[i][0]*m1[0][j] +
+                      m0[i][1]*m1[1][j] +
+                      m0[i][2]*m1[2][j] +
+                      m0[i][3]*m1[3][j]
         }
     }
     return m
+}
+
+ortho :: proc(l, r, b, t, n, f: f32) -> mat4 {
+    m : mat4 = {}
+    m[0][0] = 2.0 / (r - l)
+    m[1][1] = 2.0 / (t - b)
+    m[2][2] = -2.0 / (f - n)
+    m[3][0] = -(r + l) / (r - l)
+    m[3][1] = -(t + b) / (t - b)
+    m[3][2] = -(f + n) / (f - n)
+    m[3][3] = 1.0
+    return m
+}
+
+mod :: proc(x, y: f32) -> f32 {
+    return x - y * math.floor(x / y)
+}
+
+len_sq_vec2 :: proc(v: vec2) -> f32 {
+    return v.x*v.x + v.y*v.y
+}
+
+norm_vec2 :: proc(v: vec2) -> vec2 {
+    l := math.sqrt(v.x*v.x + v.y*v.y)
+    if l != 0 {
+        return {v.x/l, v.y/l}
+    }
+    return {0, 0}
 }

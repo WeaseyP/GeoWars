@@ -1,264 +1,344 @@
-package main
+package player
 
-import m "../../vendor/math"
 import "core:math"
 import "core:fmt"
+import m "../../vendor/math"
 import ma "../../vendor/miniaudio"
-import sapp "../../vendor/sokol/app"
-import "base:runtime"
+import shared "../../shared"
+import input "../../core/input"
+import projectile "../../game/projectile"
+import particle "../../game/particle"
 
+// Constants needed for update logic
+PLAYER_MAX_SPEED          :: 7.0
+PLAYER_ACCELERATION       :: 15.0
+PLAYER_DAMPING            :: 2.5
+// PLAYER_CLAMP_X/Y removed, using shared.ARENA_WIDTH/HEIGHT
+PLAYER_REVERSE_FACTOR     :: 0.5
+PLAYER_DASH_SPEED_MULT    :: 1.5
+PLAYER_DASH_DURATION      :: 0.15
+PLAYER_DASH_COOLDOWN      :: 3.0
+PLAYER_DASH_TRAIL_SPAWN_RATE :: 0.035
+MAX_RMB_AMMO_CHARGES      :: 2
+RMB_AMMO_REGEN_INTERVAL   :: 10.0
+BLACKHOLE_COOLDOWN_DURATION :: 1.0
+PROJECTILE_BLACKHOLE_COOLDOWN :: 0.25
 
+update_player :: proc(game_state: ^shared.GameState, dt: f32, input_mgr: ^input.InputManager, proj_mgr: ^projectile.ProjectileManager) {
+    p := &game_state.player
 
-update_player :: proc(dt: f32) {
-    if state.player_hp > 0 {
-        
-        if state.dash_timer <= 0.0 && state.is_dashing {
-            state.is_dashing = false;
+    if p.hp > 0 {
+        // --- Dash Logic ---
+        if p.dash_timer <= 0.0 && p.is_dashing {
+            p.is_dashing = false
         }
 
-        if state.key_shift_down && !state.is_dashing && state.dash_cooldown_timer <= 0.0 {
-            state.is_dashing = true;
-            state.dash_timer = PLAYER_DASH_DURATION;
-            state.dash_cooldown_timer = PLAYER_DASH_COOLDOWN;
-            state.player_invulnerable_timer = math.max(state.player_invulnerable_timer, PLAYER_DASH_DURATION);
-            state.player_dash_trail_count = 0; // Reset on new dash
-            state.dash_trail_spawn_timer = 0.0;
-            fmt.printf("Player DASH!\n");
+        if input_mgr.key_shift_down && !p.is_dashing && p.dash_cooldown_timer <= 0.0 {
+            p.is_dashing = true
+            p.dash_timer = PLAYER_DASH_DURATION
+            p.dash_cooldown_timer = PLAYER_DASH_COOLDOWN
+            p.invulnerable_timer = math.max(p.invulnerable_timer, PLAYER_DASH_DURATION)
+            p.dash_trail_count = 0
+            p.dash_trail_spawn_timer = 0.0
+            fmt.printf("Player DASH!\n")
         }
 
+        // --- Timers ---
+        if p.dash_cooldown_timer > 0 { p.dash_cooldown_timer -= dt }
+        if p.lmb_cooldown_timer > 0 { p.lmb_cooldown_timer -= dt }
+        if p.rmb_cooldown_timer > 0 { p.rmb_cooldown_timer -= dt }
+        if p.invulnerable_timer > 0 { p.invulnerable_timer -= dt }
 
-         if state.current_rmb_ammo_charges < MAX_RMB_AMMO_CHARGES {
-             state.rmb_ammo_regen_timer -= dt;
-             if state.rmb_ammo_regen_timer <= 0.0 {
-                 spawn_visual_ammo_charge_particles(state.current_rmb_ammo_charges);
-                 state.current_rmb_ammo_charges += 1;
-                 state.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL; 
-                 fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
-             }
-         }
-        accel_input_f := m.vec2_zero(); 
-        if state.key_w_down {accel_input_f.y+=1.0}; if state.key_s_down {accel_input_f.y-=1.0}; 
-        if state.key_a_down {accel_input_f.x-=1.0}; if state.key_d_down {accel_input_f.x+=1.0};  
-        if m.len_sq_vec2(accel_input_f) > 0.001 {accel_input_f=m.norm_vec2(accel_input_f)}; 
-        if state.is_dashing {
-            if state.dash_timer <= 0.0 {
-                state.is_dashing = false;
-                state.player_dash_trail_count = 0; // Clear trails when dash ends
+        // --- Ammo Regen ---
+        if p.current_rmb_ammo_charges < MAX_RMB_AMMO_CHARGES {
+            p.rmb_ammo_regen_timer -= dt
+            if p.rmb_ammo_regen_timer <= 0.0 {
+                particle.spawn_visual_ammo_charge_particles(game_state, p.current_rmb_ammo_charges)
+                p.current_rmb_ammo_charges += 1
+                p.rmb_ammo_regen_timer = RMB_AMMO_REGEN_INTERVAL
+                fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", p.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES)
+            }
+        }
+
+        // --- Movement ---
+        accel_input := input.get_movement_vector(input_mgr)
+
+        if p.is_dashing {
+            if p.dash_timer <= 0.0 {
+                p.is_dashing = false
+                p.dash_trail_count = 0
             } else {
-                // Spawn trail points periodically during the dash
-                state.dash_trail_spawn_timer -= dt;
-                if state.dash_trail_spawn_timer <= 0.0 {
-                    state.dash_trail_spawn_timer = PLAYER_DASH_TRAIL_SPAWN_RATE;
-
-                    // --- START FIX ---
-                    // Shift existing trail positions
-                    for i := PLAYER_DASH_TRAIL_LENGTH - 1; i > 0; i -= 1 {
-                        state.player_dash_traiL_pos[i] = state.player_dash_traiL_pos[i-1];
+                p.dash_trail_spawn_timer -= dt
+                if p.dash_trail_spawn_timer <= 0.0 {
+                    p.dash_trail_spawn_timer = PLAYER_DASH_TRAIL_SPAWN_RATE
+                    // Shift trail
+                    for i := shared.PLAYER_DASH_TRAIL_LENGTH - 1; i > 0; i -= 1 {
+                        p.dash_trail_pos[i] = p.dash_trail_pos[i-1]
                     }
-                    // Add new position at the front
-                    state.player_dash_traiL_pos[0] = state.player_pos;
-                    // --- END FIX ---
-                    
-                    // Increment count, but don't exceed max length
-                    if state.player_dash_trail_count < PLAYER_DASH_TRAIL_LENGTH {
-                        state.player_dash_trail_count += 1;
+                    p.dash_trail_pos[0] = p.pos
+                    if p.dash_trail_count < shared.PLAYER_DASH_TRAIL_LENGTH {
+                        p.dash_trail_count += 1
                     }
                 }
             }
-            dash_direction := accel_input_f;
-            if m.len_sq_vec2(dash_direction) < 0.1 && m.len_sq_vec2(state.player_vel) > 0.1 {
-                dash_direction = m.norm_vec2(state.player_vel);
+
+            dash_direction := accel_input
+            if m.len_sq_vec2(dash_direction) < 0.1 && m.len_sq_vec2(p.vel) > 0.1 {
+                dash_direction = m.norm_vec2(p.vel)
             } else if m.len_sq_vec2(dash_direction) < 0.1 {
-                dash_direction = {0, 1}; // Default dash forward if stationary with no input
+                dash_direction = {0, 1}
             }
-            state.player_vel = dash_direction * PLAYER_MAX_SPEED * PLAYER_DASH_SPEED_MULT;
+            p.vel = dash_direction * PLAYER_MAX_SPEED * PLAYER_DASH_SPEED_MULT
         } else {
-            // Normal movement logic
-            final_accel_f := accel_input_f*PLAYER_ACCELERATION; // Renamed
-            if state.key_s_down && !state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= PLAYER_REVERSE_FACTOR };
-            state.player_vel += final_accel_f*dt; 
-            damping_factor_f := math.max(0.0, 1.0-PLAYER_DAMPING*dt); // Renamed
-            state.player_vel *= damping_factor_f; 
-            if m.len_sq_vec2(state.player_vel) > f32(PLAYER_MAX_SPEED*PLAYER_MAX_SPEED) { state.player_vel=m.norm_vec2(state.player_vel)*PLAYER_MAX_SPEED }; 
-        }
-
-
-        state.player_pos += state.player_vel*dt;
-
-        rmb_pressed_this_frame_f := state.rmb_down && !state.previous_rmb_down;
-        if rmb_pressed_this_frame_f && state.current_rmb_ammo_charges > 0 {
-            remove_visual_ammo_charge_particles(state.current_rmb_ammo_charges - 1); 
-        }
-        if rmb_pressed_this_frame_f && state.rmb_cooldown_timer <= 0.0 { 
-            if state.current_rmb_ammo_charges > 0 {
-                state.current_rmb_ammo_charges -= 1;
-                spawn_swirling_charge(); 
-                fmt.printf("RMB Fired! Ammo Remaining: %d/%d\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
-                if BLACKHOLE_COOLDOWN_DURATION > 0.0 { state.rmb_cooldown_timer=BLACKHOLE_COOLDOWN_DURATION; } 
-            } else {
-                fmt.printf("RMB - NO AMMO! (Charges: %d/%d)\n", state.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES);
+            // physics-based movement (drift)
+            // Apply Acceleration
+            if m.len_sq_vec2(accel_input) > 0.001 {
+               p.vel += accel_input * shared.PLAYER_ACCEL * dt
             }
-        }; 
-        state.previous_rmb_down=state.rmb_down;
-
-        if state.lmb_down && state.lmb_cooldown_timer <= 0.0 { 
-            spawn_blackhole_projectile_weapon();
-            seek_result_f := ma.sound_seek_to_pcm_frame(&state.lmb_sound, 0) // Renamed
-            if seek_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result_f) }
-            start_result_f := ma.sound_start(&state.lmb_sound) // Renamed
-            if start_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result_f) }
-            state.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN;
-        }
-        state.previous_lmb_down = state.lmb_down;
-    } else {
-        state.player_vel = {0,0}; 
-        if !state.player_defeated_message_shown {
-            fmt.printf("--- PLAYER DEFEATED ---\n");
-            state.player_defeated_message_shown = true;
-        }
-    }
-}
-
-handle_player_input :: proc(event: ^sapp.Event) {
-    #partial switch event.type {
-    case .KEY_DOWN: #partial switch event.key_code { 
-        case .W: state.key_w_down=true; 
-        case .S: state.key_s_down=true; 
-        case .A: state.key_a_down=true; 
-        case .D: state.key_d_down=true; 
-        case .LEFT_SHIFT: state.key_shift_down = true; // <<< NEW
-        case .ESCAPE: sapp.request_quit(); 
-    }
-    case .KEY_UP: #partial switch event.key_code { 
-        case .W: state.key_w_down=false; 
-        case .S: state.key_s_down=false; 
-        case .A: state.key_a_down=false; 
-        case .D: state.key_d_down=false; 
-        case .LEFT_SHIFT: state.key_shift_down = false; // <<< NEW
-    }
-    case .MOUSE_DOWN: 
-        if event.mouse_button == .RIGHT { state.rmb_down = true }
-        if event.mouse_button == .LEFT  { state.lmb_down = true }
-    case .MOUSE_UP: 
-        if event.mouse_button == .RIGHT { state.rmb_down = false }
-        if event.mouse_button == .LEFT  { state.lmb_down = false }
-    case .MOUSE_MOVE: 
-        state.mouse_screen_pos = {event.mouse_x, event.mouse_y}
-    }
-}
-
-check_player_boss_laser_collision :: proc() {
-    context = runtime.default_context()
-    if state.player_hp <= 0 || state.player_invulnerable_timer > 0.0 { return }
-
-    player_center := state.player_pos
-    player_radius : f32 = PLAYER_CORE_WORLD_RADIUS
-
-    for i in 0..<MAX_ENEMIES {
-        enemy_laser_coll := &state.enemies[i] 
-        if !enemy_laser_coll.active || enemy_laser_coll.type != .BOSS_CHROME_ORB || enemy_laser_coll.is_dying || enemy_laser_coll.is_growing {
-            continue 
-        }
-
-        // Constants from shader for coordinate space understanding
-        shader_uv_sphere_radius          : f32 = 0.45; // Radius of main sphere in shader's p_scaled_uv space
-        shader_black_circle_orbit_factor : f32 = 0.6;  // Black circle orbits at 0.6 * main sphere's p_scaled_uv radius
-
-        // enemy_laser_coll.current_size is the base world size of the boss entity (e.g., ENEMY_BOSS_CHROME_ORB_SCALE)
-        // In the shader, 1 unit in p_scaled_uv space corresponds to 'enemy_laser_coll.current_size' world units.
-        world_radius_of_main_sphere_visual := enemy_laser_coll.current_size * shader_uv_sphere_radius;
-        world_orbit_radius_for_black_circle := world_radius_of_main_sphere_visual * shader_black_circle_orbit_factor;
-
-        boss_facing_direction := m.norm_vec2(m.vec2{math.cos(enemy_laser_coll.rotation), math.sin(enemy_laser_coll.rotation)});
-        black_circle_world_center := enemy_laser_coll.pos + boss_facing_direction * world_orbit_radius_for_black_circle;
-
-        laser_origin_world := black_circle_world_center; // Laser originates from the black circle's center
-        laser_direction_vec := boss_facing_direction;    // Laser fires in the boss's facing direction
-
-        vec_to_player_from_origin := player_center - laser_origin_world;
             
-        player_local_y := m.dot_vec2(vec_to_player_from_origin, laser_direction_vec); // Distance along laser axis
-        laser_perpendicular_vec := m.vec2{-laser_direction_vec.y, laser_direction_vec.x};
-        player_local_x := m.dot_vec2(vec_to_player_from_origin, laser_perpendicular_vec); // Perpendicular distance from laser axis
+            // Apply Friction (Damping)
+            // v = v / (1 + friction * dt) or v *= (1 - f*dt)
+            // Let's use proportional damping
+            damping := 1.0 / (1.0 + shared.PLAYER_FRICTION * dt)
+            p.vel *= damping
 
-
-        // Check collision with the laser beam segment (approximated as a rectangle + end caps)
-        // BOSS_LASER_LENGTH and BOSS_LASER_WIDTH are world units
-        if player_local_y >= -player_radius && player_local_y <= (BOSS_LASER_LENGTH + player_radius) && 
-           math.abs(player_local_x) <= (BOSS_LASER_WIDTH / 2.0 + player_radius) {            
-
-            // More precise check for rectangle body of the laser
-            if player_local_y > 0 && player_local_y < BOSS_LASER_LENGTH && 
-               math.abs(player_local_x) < (BOSS_LASER_WIDTH / 2.0 + player_radius) {
-                // Collision with laser body
-                state.player_hp -= BOSS_LASER_DAMAGE
-                state.player_hp = math.max(state.player_hp, 0)
-                state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION / 2.0 
-                fmt.printf("Player hit by BOSS LASER (Body)! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-                // TODO: Specific sound for player getting hit by laser
-                return 
-            } else { // Check end caps (circles at laser_origin_world and laser_origin_world + direction * length)
-                cap_radius_for_check_sq := (BOSS_LASER_WIDTH / 2.0 + player_radius) * (BOSS_LASER_WIDTH / 2.0 + player_radius);
+            // Cap Speed
+            if m.len_sq_vec2(p.vel) > f32(shared.PLAYER_SPEED * shared.PLAYER_SPEED) {
+                p.vel = m.norm_vec2(p.vel) * shared.PLAYER_SPEED
+            }
+            
+            // Smooth Rotation towards Mouse
+            // Target angle based on mouse
+            target_world := get_mouse_world_pos(input_mgr.mouse_screen_pos, &game_state.camera)
+            dir_to_mouse := target_world - p.pos
+            if m.len_sq_vec2(dir_to_mouse) > 0.001 {
+                target_ang := math.atan2(dir_to_mouse.y, dir_to_mouse.x)
+                // Lerp angle
+                diff := target_ang - p.rotation
+                // Wrap diff to -PI, PI
+                for diff > m.PI do diff -= m.TAU
+                for diff < -m.PI do diff += m.TAU
                 
-                // Check cap at laser origin
-                if m.dist_sq_vec2(player_center, laser_origin_world) < cap_radius_for_check_sq {
-                    state.player_hp -= BOSS_LASER_DAMAGE
-                    state.player_hp = math.max(state.player_hp, 0)
-                    state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION / 2.0
-                    fmt.printf("Player hit by BOSS LASER (Origin Cap)! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-                    return
-                }
-                
-                // Check cap at laser end
-                laser_end_world := laser_origin_world + laser_direction_vec * BOSS_LASER_LENGTH;
-                if m.dist_sq_vec2(player_center, laser_end_world) < cap_radius_for_check_sq {
-                     state.player_hp -= BOSS_LASER_DAMAGE
-                    state.player_hp = math.max(state.player_hp, 0)
-                    state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION / 2.0
-                    fmt.printf("Player hit by BOSS LASER (End Cap)! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-                    return
-                }
+                p.rotation += diff * shared.PLAYER_ROTATION_SPEED * dt
             }
         }
-    }
-}
 
-check_player_enemy_collisions :: proc() {
-    context = runtime.default_context()
-    if state.player_hp <= 0 || state.player_invulnerable_timer > 0.0 { return }
-    player_radius_pe_coll := f32(PLAYER_CORE_WORLD_RADIUS) // Renamed
-    for i in 0..<MAX_ENEMIES {
-        enemy_pe_coll := &state.enemies[i] // Renamed
-        if !enemy_pe_coll.active || enemy_pe_coll.is_growing || enemy_pe_coll.is_dying { continue } // Ignore dying enemies too
+        p.pos += p.vel * dt
         
-        enemy_radius_pe_coll := enemy_pe_coll.current_size * 0.5 // Renamed
-        if enemy_radius_pe_coll <= 0.001 { continue }
-        dist_sq_pe_coll := m.dist_sq_vec2(state.player_pos, enemy_pe_coll.pos) // Renamed
-        radii_sum_pe_coll := player_radius_pe_coll + enemy_radius_pe_coll // Renamed
-        radii_sum_sq_pe_coll := radii_sum_pe_coll * radii_sum_pe_coll // Renamed
-        if dist_sq_pe_coll < radii_sum_sq_pe_coll {
-            if enemy_pe_coll.hp <= 0 { continue } 
-            
-            damage_to_player := ENEMY_GRUNT_DAMAGE_VALUE; // Default
-            if enemy_pe_coll.type == .SLOWBOY && enemy_pe_coll.is_charging_attack {
-                damage_to_player = SLOWBOY_ATTACK_DAMAGE;
-                 fmt.printf("Player hit by SLOWBOY CHARGE!\n");
-                 // Optionally, end charge state for slowboy
-                 enemy_pe_coll.is_charging_attack = false;
-                 enemy_pe_coll.vel = {0,0}; // Stop it
-            } else if enemy_pe_coll.type == .BOSS_CHROME_ORB {
-                 // Boss collision damage could be different, or rely only on laser
-                 // For now, let boss body collision also do grunt damage.
-                 fmt.printf("Player hit by BOSS BODY!\n");
-            }
-
-
-            state.player_hp -= damage_to_player 
-            state.player_hp = math.max(state.player_hp, 0) 
-            state.player_invulnerable_timer = PLAYER_INVULNERABILITY_DURATION
-            fmt.printf("Player hit by ENEMY! HP: %d/%d. Invulnerable for %.2fs\n", state.player_hp, state.player_max_hp, state.player_invulnerable_timer)
-            // TODO: Specific sound for player getting hit
-            break 
+    // --- Hexagon Collision ---
+    // Normals for a Flat-topped Hexagon (point up/down? Or flat up?)
+    // User asked for "Hexagon Arena".
+    // 6 Normals. 
+    // Let's assume Point-Top (normals at 0, 60, 120, 180, 240, 300 deg).
+    // Or Flat-Top (30, 90, 150...).
+    // Simplest is Flat-Top (Walls at +Y, -Y etc).
+    // Let's align with the previous "Box" aspect ratio? No, Hexagon is usually regular regular.
+    // Radius R.
+    // Normals:
+    // 0: (1, 0)
+    // 1: (0.5, 0.866)
+    // 2: (-0.5, 0.866)
+    // 3: (-1, 0)
+    // ...
+    // Distance from center along normal must be < R.
+    // Actually, dot(p, n) < R_dist (distance to wall).
+    // For regular hexagon, distance to wall = R * cos(30) = R * 0.866.
+    
+    // --- SDF Collision (Exact) ---
+    // Using Signed Distance Field logic to keep player inside Hexagon.
+    // Flat-Top Hexagon logic (matching shader visual).
+    // The shader uses a Flat-Top heuristic by swapping X/Y, or rotating by 90.
+    // Here we implement `sdHexagon` directly.
+    
+    // Transform pos to local symmetry
+    p_local := p.pos
+    // For Flat-Top alignment (walls at Y +/- R), we treat X as the "pointy" axis in standard SDF, 
+    // or we just swap X/Y to use the standard Pointy-Top generic formula.
+    // Standard Inigo Quilez `sdHexagon` is Pointy-Top (Vertex at Y).
+    // Our visual is Flat-Top (Vertex at X, Side at Y).
+    // So swapping X/Y works.
+    p_local = {p_local.y, p_local.x}
+    
+    p_local = {math.abs(p_local.x), math.abs(p_local.y)}
+    
+    // Hexagon Constants
+    k := m.vec3{-0.866025404, 0.5, 0.577350269}
+    
+    // Dot product for symmetry
+    dot_k_p := k.x*p_local.x + k.y*p_local.y
+    min_dot := math.min(dot_k_p, 0.0)
+    p_local -= {2.0 * min_dot * k.x, 2.0 * min_dot * k.y}
+    
+    // Clamp to box
+    clamp_val := math.clamp(p_local.x, -k.z * shared.ARENA_HEX_RADIUS, k.z * shared.ARENA_HEX_RADIUS)
+    p_local -= {clamp_val, shared.ARENA_HEX_RADIUS}
+    
+    dist := math.sqrt(p_local.x*p_local.x + p_local.y*p_local.y) * math.sign(p_local.y)
+    
+    // Collision Response
+    // We want to keep player INSIDE, so distance should be NEGATIVE.
+    // If dist > -radius (or > 0 for pure boundary), we preserve.
+    // Actually `sdHexagon` returns distance *from edge*. 
+    // Negative = Inside, Positive = Outside.
+    // We want to keep `dist < -PLAYER_RADIUS` ideally? Or just `dist < 0` (center point).
+    // Let's constrain center point to be inside by radius.
+    // Effective limit: dist > -shared.PLAYER_CORE_WORLD_RADIUS essentially means touching/penetrating.
+    // Real logic: If (dist > -radius), push back.
+    
+    wall_threshold := -f32(shared.PLAYER_CORE_WORLD_RADIUS)
+    
+    if dist > wall_threshold {
+        // Penetration
+        penetration := dist - wall_threshold
+        
+        // Gradient (Normal) calculation
+        // Numerical gradient? Or derive it?
+        // Basic approximate normal: exact vector from closest point?
+        // For SDF, Gradient = normalize(p - closest_point).
+        // Since we modified p_local, recovering true normal is tricky without re-evaluating.
+        // But for a simple convex shape, the push direction is roughly -p (if far) or normal.
+        
+        // Simpler approach: Finite Difference for normal
+        eps :: 0.001
+        
+        // Recalculate SDF for gradient
+        sd_hex :: proc(p: m.vec2, r: f32) -> f32 {
+             k := m.vec3{-0.866025404, 0.5, 0.577350269}
+             p_loc := m.vec2{math.abs(p.y), math.abs(p.x)} // Swap/Abs
+             d_k := k.x*p_loc.x + k.y*p_loc.y
+             m_d := math.min(d_k, 0.0)
+             p_loc -= {2.0*m_d*k.x, 2.0*m_d*k.y}
+             c_v := math.clamp(p_loc.x, -k.z*r, k.z*r)
+             p_loc -= {c_v, r}
+             return math.sqrt(p_loc.x*p_loc.x + p_loc.y*p_loc.y) * math.sign(p_loc.y)
+        }
+        
+        d_x := sd_hex(p.pos + {eps, 0}, shared.ARENA_HEX_RADIUS) - sd_hex(p.pos - {eps, 0}, shared.ARENA_HEX_RADIUS)
+        d_y := sd_hex(p.pos + {0, eps}, shared.ARENA_HEX_RADIUS) - sd_hex(p.pos - {0, eps}, shared.ARENA_HEX_RADIUS)
+        normal := m.norm_vec2({d_x, d_y})
+        
+        // Push Back
+        p.pos -= normal * penetration
+        
+        // Velocity Reflection
+        v_dot_n := m.dot(p.vel, normal)
+        if v_dot_n > 0.0 {
+            p.vel -= normal * v_dot_n
         }
     }
+
+        // --- Shooting (RMB) ---
+        rmb_pressed := input.rmb_pressed(input_mgr)
+        if rmb_pressed && p.current_rmb_ammo_charges > 0 {
+            particle.remove_visual_ammo_charge_particles(game_state, p.current_rmb_ammo_charges - 1)
+        }
+
+        if rmb_pressed && p.rmb_cooldown_timer <= 0.0 {
+            if p.current_rmb_ammo_charges > 0 {
+                p.current_rmb_ammo_charges -= 1
+                particle.spawn_swirling_charge(game_state)
+                fmt.printf("RMB Fired! Ammo Remaining: %d/%d\n", p.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES)
+                if BLACKHOLE_COOLDOWN_DURATION > 0.0 {
+                    p.rmb_cooldown_timer = BLACKHOLE_COOLDOWN_DURATION
+                }
+                
+                // RMB Juice
+                game_state.camera.shake_duration = 0.3
+                game_state.camera.shake_intensity = 0.2
+                
+                // Muzzle Flash (Omni-directional logic? Or just center burst)
+                 particle.spawn_muzzle_flash(game_state, p.pos, {1,0}) 
+                 particle.spawn_muzzle_flash(game_state, p.pos, {-1,0}) 
+            } else {
+                fmt.printf("RMB - NO AMMO! (Charges: %d/%d)\n", p.current_rmb_ammo_charges, MAX_RMB_AMMO_CHARGES)
+            }
+        }
+
+        // --- Shooting (LMB) ---
+        if input_mgr.lmb_down && p.lmb_cooldown_timer <= 0.0 {
+            // Calculate direction
+            target_pos := input_mgr.mouse_screen_pos // This is screen pos, need world pos.
+            // Wait, get_mouse_world_pos logic was in geowars.odin.
+            // We need to convert screen to world. We can use input_mgr.mouse_screen_pos
+            // but we need resolution and ortho height.
+            // Assuming we pass those or calculate them.
+            // For now, let's assume we can get it or pass it.
+            // Actually, spawn_blackhole in projectile_manager takes pos and vel.
+            // We calculate vel here.
+            
+            // We need to calculate world pos of mouse.
+            // Let's defer that calculation to a helper or just do it if we have access to sapp/constants.
+            // ORTHO_HEIGHT is in shared? No, it was in constants.odin.
+            // I should have moved constants to shared. I did not move ORTHO_HEIGHT to shared yet.
+            // I'll assume 1.5 for now or move it.
+
+            // Re-implementing mouse world pos logic here requires sapp imports.
+            // I will implement a helper here.
+
+            spawn_pos := p.pos
+            target_world := get_mouse_world_pos(input_mgr.mouse_screen_pos, &game_state.camera)
+
+            direction := target_world - spawn_pos
+            if m.len_sq_vec2(direction) > 0.0001 {
+                direction = m.norm_vec2(direction)
+            } else {
+                if m.len_sq_vec2(p.vel) > 0.001 {
+                    direction = m.norm_vec2(p.vel)
+                } else {
+                    direction = {0, 1}
+                }
+            }
+
+            vel := direction * projectile.PROJECTILE_BLACKHOLE_INITIAL_SPEED
+            projectile.spawn_blackhole(proj_mgr, spawn_pos, vel)
+            
+            // LMB Juice
+            // Recoil
+            RECOIL_FORCE :: 1.5 // Reduced from 5.0 to prevent jitter/reverse movement
+            p.vel -= direction * RECOIL_FORCE
+            
+            // Muzzle Flash
+            particle.spawn_muzzle_flash(game_state, spawn_pos + direction * 0.2, direction)
+            
+            // Screen Shake
+            game_state.camera.shake_duration = 0.1
+            game_state.camera.shake_intensity = 0.05 // Reduced from 0.1
+
+            ma.sound_seek_to_pcm_frame(&game_state.lmb_sound, 0)
+            ma.sound_start(&game_state.lmb_sound)
+
+            p.lmb_cooldown_timer = PROJECTILE_BLACKHOLE_COOLDOWN
+        }
+
+    } else {
+        p.vel = {0,0}
+        if !p.defeated_message_shown {
+            fmt.printf("--- PLAYER DEFEATED ---\n")
+            p.defeated_message_shown = true
+        }
+    }
+}
+
+// Helper
+import sapp "../../vendor/sokol/app"
+
+get_mouse_world_pos :: proc(screen_pos: m.vec2, camera: ^shared.Camera) -> m.vec2 {
+    width := sapp.widthf()
+    height := sapp.heightf()
+    
+    // NDC
+    ndc_x := (2.0 * screen_pos.x / width) - 1.0
+    ndc_y := 1.0 - (2.0 * screen_pos.y / height)
+    
+    aspect := width / height
+    
+    // View dimensions
+    ortho_height := f32(shared.ORTHO_HEIGHT)
+    ortho_width := ortho_height * aspect
+    
+    // World pos relative to camera center
+    world_x := ndc_x * ortho_width
+    world_y := ndc_y * ortho_height
+    
+    return {world_x + camera.pos.x, world_y + camera.pos.y}
 }

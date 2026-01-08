@@ -1,0 +1,60 @@
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/shared/types.odin(35:14) Error: Undeclared name: grid 
+	grid_system: grid.Grid 
+	             ^~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/shared/types.odin(36:12) Error: Undeclared name: input 
+	input_mgr: input.InputManager 
+	           ^~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(118:62) Error: 'Vertex' is not declared by 'shared' 
+	... _vertices :: proc(g: ^Grid, vertices: ^[dynamic]shared.Vertex) { 
+	                                                    ^~~~~~~~~~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(129:13) Error: Ambiguous procedure group call 'append' that match with the given arguments 
+	append(vertices, shared.Vertex{pos = {p1.pos.x, p1.pos. ... 
+	^~~~~^ 
+	Given argument types: (^[dynamic]invalid type, invalid type) 
+	append_elem :: proc(array: ^$T/[dynamic]$E, #no_broadcast arg: E, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(620:2) 
+	append_elem_string :: proc(array: ^$T/[dynamic]$E/u8, arg: $A/string, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(622:2) 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(129:30) Error: 'Vertex' is not declared by 'shared' 
+	... rtices, shared.Vertex{pos = {p1.pos.x, p1.pos.y, 0}, color = c1 ... 
+	            ^~~~~~~~~~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(130:13) Error: Ambiguous procedure group call 'append' that match with the given arguments 
+	append(vertices, shared.Vertex{pos = {p2.pos.x, p2.pos. ... 
+	^~~~~^ 
+	Given argument types: (^[dynamic]invalid type, invalid type) 
+	append_elem :: proc(array: ^$T/[dynamic]$E, #no_broadcast arg: E, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(620:2) 
+	append_elem_string :: proc(array: ^$T/[dynamic]$E/u8, arg: $A/string, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(622:2) 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(130:30) Error: Illegal compound literal, invalid type cannot be used as a compound literal with fields 
+	... rtices, shared.Vertex{pos = {p2.pos.x, p2.pos.y, 0}, color = c2 ... 
+	            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ... 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(143:13) Error: Ambiguous procedure group call 'append' that match with the given arguments 
+	append(vertices, shared.Vertex{pos = {p1.pos.x, p1.pos. ... 
+	^~~~~^ 
+	Given argument types: (^[dynamic]invalid type, invalid type) 
+	append_elem :: proc(array: ^$T/[dynamic]$E, #no_broadcast arg: E, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(620:2) 
+	append_elem_string :: proc(array: ^$T/[dynamic]$E/u8, arg: $A/string, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(622:2) 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(143:30) Error: Illegal compound literal, invalid type cannot be used as a compound literal with fields 
+	... rtices, shared.Vertex{pos = {p1.pos.x, p1.pos.y, 0}, color = c1 ... 
+	            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ... 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(144:13) Error: Ambiguous procedure group call 'append' that match with the given arguments 
+	append(vertices, shared.Vertex{pos = {p2.pos.x, p2.pos. ... 
+	^~~~~^ 
+	Given argument types: (^[dynamic]invalid type, invalid type) 
+	append_elem :: proc(array: ^$T/[dynamic]$E, #no_broadcast arg: E, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(620:2) 
+	append_elem_string :: proc(array: ^$T/[dynamic]$E/u8, arg: $A/string, loc := #caller_location) -> (n: int, err: Allocator_Error) at C:/Odin/base/runtime/core_builtin.odin(622:2) 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/game/grid/grid.odin(144:30) Error: 'shared.Vertex' is not a type 
+	... rtices, shared.Vertex{pos = {p2.pos.x, p2.pos.y, 0}, color = c2 ... 
+	            ^~~~~~~~~~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/core/geowars.odin(331:33) Error: 'Vertex' is not declared by 'shared' 
+	... id_verts := make([dynamic]shared.Vertex, context.temp_allocator) 
+	                              ^~~~~~~~~~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/core/geowars.odin(336:83) Error: 'Vertex' is not declared by 'shared' 
+	... d_verts[0], size=uint(len(grid_verts) * size_of(shared.Vertex))} 
+	                                                    ^~~~~~~~~~~~^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/core/geowars.odin(344:9) Error: Too many arguments for 'sg.apply_uniforms', expected 2 arguments, got 3 
+	sg.apply_uniforms(.VS, shared.UB_line_vs_params, {&stat ... 
+	^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ... 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/core/geowars.odin(344:28) Error: Invalid type 'i32' for implicit selector expression '.VS' 
+	... iforms(.VS, shared.UB_line_vs_params, {&state.player_vs_params, ... 
+	            ^^ 
+C:/Users/ryanp/Documents/dev/GALDR_v0.01/GeoWars/geowars/src/core/geowars.odin(344:58) Error: Missing type in compound literal 
+	... params, {&state.player_vs_params, size_of(state.player_vs_param ... 
+	            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ... 

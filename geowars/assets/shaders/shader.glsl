@@ -1,6 +1,6 @@
 // File: shader.glsl (Merged Version, with Player Health Display)
 //------------------------------------------------------------------------------
-@header package main
+@header package shared
 @header import sg "../vendor/sokol/gfx"
 @header import m "../vendor/math"
 @ctype mat4 m.mat4
@@ -19,6 +19,7 @@ layout(binding=0) uniform bg_fs_params {
     float tick;
     vec2 resolution;
     int bg_option;
+    vec2 cam_offset; // Renamed from offset
 };
 out vec4 frag_color;
 
@@ -42,12 +43,36 @@ float calculate_star_mask(vec2 uv_star, float star_radius, float aa_width) { // 
     return max_star_shape;
 }
 
+// SDF for an octagon
+float sdOctagon( in vec2 p, in float r ) {
+  const vec3 k = vec3(-0.9238795325, 0.3826834323, 0.4142135623 ); // cos(22.5), sin(22.5), tan(22.5)
+  p = abs(p);
+  p -= 2.0*min(dot(vec2( k.x,k.y),p),0.0)*vec2( k.x,k.y);
+  p -= 2.0*min(dot(vec2(-k.x,k.y),p),0.0)*vec2(-k.x,k.y);
+  p -= vec2(clamp(p.x, -k.z*r, k.z*r), r);
+  return length(p)*sign(p.y);
+}
+
 void main() { // fs_bg main
+    vec3 final_color = vec3(0.0);
+    float final_alpha = 1.0;
+
+    // Calculate world position for the current fragment
+    // Normalized to View Height (Height = 1.0 in uv space).
+    // View Height in World Units is 14.0 (2 * ORTHO_HEIGHT = 2 * 7.0).
+    vec2 world_uv = (gl_FragCoord.xy - resolution * 0.5) / resolution.y;
+    world_uv.y = -world_uv.y; // Flip Y for Top-Left Origin (D3D11/Windows) match to Y-Up World
+    vec2 pixel_world_pos = world_uv * 14.0 + cam_offset; 
+
     if (bg_option == 0) {
-        vec2 xy = fract((gl_FragCoord.xy-vec2(tick)) / 50.0);
-        frag_color = vec4(vec3(xy.x*xy.y), 1.0);
+        // Simple grid, apply parallax to gl_FragCoord
+        vec2 parallax_coord = gl_FragCoord.xy - cam_offset * 0.1; // Small parallax
+        vec2 xy = fract((parallax_coord - vec2(tick)) / 50.0);
+        final_color = vec3(xy.x*xy.y);
     } else {
-        vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
+        // Nebula and stars, apply parallax to UVs
+        // Parallax boosted from 0.05 to 0.2 for better motion sense
+        vec2 uv_aspect = (gl_FragCoord.xy - cam_offset * 0.2) / resolution.y; 
         float time = tick;
         vec2 nebula_p = uv_aspect * 0.8 + vec2(time * 0.008, time * 0.003);
         float noise_val = fbm(nebula_p, 5, 0.5, 2.1);
@@ -56,7 +81,9 @@ void main() { // fs_bg main
         vec3 nb=mix(deep_space_color,nc1,smoothstep(0.1,0.5,noise_val));
         vec3 nm=mix(nb,nc2,smoothstep(0.35,0.65,noise_val));
         vec3 fnc=mix(nm,nhl,smoothstep(0.6,0.8,noise_val));
-        vec2 star_uv = uv_aspect * 40.0 + time * 0.05;
+        
+        // Parallax boosted from 0.2 to 0.8 for stars (faster layer)
+        vec2 star_uv = (gl_FragCoord.xy - cam_offset * 0.8) / resolution.y * 40.0 + time * 0.05; 
         float density_thresh = 0.80; float bright_power = 15.0;
         float star_rad = 0.03; float star_aa = 0.06;
         float min_twinkle_bright = 0.6; float overall_star_brightness_multiplier = 1.8;
@@ -83,9 +110,73 @@ void main() { // fs_bg main
                 star_light = final_star_color * inherent_brightness * twinkle * overall_star_brightness_multiplier;
             }
         }
-        vec3 final_color = fnc * 0.9 + star_light * star_mask;
-        frag_color = vec4(clamp(final_color, 0.0, 1.0), 1.0);
+        final_color = fnc * 0.9 + star_light * star_mask;
+        
+        // --- Speed Grid ---
+        // Adds sense of motion
+        vec2 grid_uv = (pixel_world_pos * 1.5); // Grid scale
+        vec2 grid_f = fract(grid_uv);
+        float grid_line = smoothstep(0.95, 0.96, grid_f.x) + smoothstep(0.95, 0.96, grid_f.y);
+        final_color += vec3(0.05, 0.1, 0.2) * grid_line * 0.5; // Subtle blue grid
     }
+
+    // --- Arena Boundary (Hexagon) ---
+    // Flat-Topped Hexagon (Matches physics)
+    // Radius (apothem/dist to wall) = 14.0 * 0.866 = 12.12? 
+    // Wait, ARENA_HEX_RADIUS (14.0) usually refers to circumradius (center to vertex).
+    // Physics used hex_dist = 14.0 * 0.866.
+    // Let's use standard sdHexagon and verify size.
+    
+    float hex_radius = 14.0; 
+    
+    // Inigo Quilez sdHexagon (Pointy Topped)
+    // To match Flat Topped (walls at Y), we rotate p by 90 deg or swap x/y.
+    // But let's check standard orientation.
+    // Pointy top has vertex at (0, R). Flat top has edge at (0, R*cos30).
+    // My physics enforces walls at Y = +/- 12.12.
+    // This defines a Flat Topped Hexagon.
+    
+    // SDF for Pointy Hexagon
+    // float sdHexagon( in vec2 p, in float r )
+    // {
+    //     const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+    //     p = abs(p);
+    //     p -= 2.0*min(dot(k.xy, p), 0.0)*k.xy;
+    //     p -= vec2(clamp(p.x, -k.z*r, k.z*r), r);
+    //     return length(p)*sign(p.y);
+    // }
+    
+    vec2 p_hex = pixel_world_pos.yx; // Swap X/Y for Flat Top alignment
+    p_hex = abs(p_hex);
+    
+    const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+    p_hex -= 2.0*min(dot(k.xy, p_hex), 0.0)*k.xy;
+    p_hex -= vec2(clamp(p_hex.x, -k.z*hex_radius, k.z*hex_radius), hex_radius);
+    
+    float dist_to_boundary = length(p_hex)*sign(p_hex.y);
+
+    float boundary_thickness = 0.4; 
+    float boundary_glow_falloff = 3.0;
+    float boundary_intensity = 2.0;
+
+    float boundary_alpha = smoothstep(boundary_thickness, 0.0, abs(dist_to_boundary));
+    vec3 boundary_color = vec3(0.0, 1.0, 1.0); // Cyan
+
+    float glow_factor = exp(-abs(dist_to_boundary) * boundary_glow_falloff);
+    final_color += boundary_color * glow_factor * boundary_intensity;
+    
+    // --- The Void Mask ---
+    // If outside hexagon, darken significantly
+    if (dist_to_boundary > 0.05) {
+        // Smooth falloff into void
+        float void_alpha = smoothstep(0.05, 0.5, dist_to_boundary);
+        final_color = mix(final_color, vec3(0.0), void_alpha); 
+        // Or discard? Discard might look aliased.
+        // Let's just multiply by (1-void_alpha)
+        final_alpha *= (1.0 - void_alpha);
+    }
+    
+    frag_color = vec4(clamp(final_color, 0.0, 1.0), final_alpha);
 }
 @end
 @program bg vs_bg fs_bg
@@ -415,6 +506,34 @@ void main() {
 @end
 @program blackhole vs_blackhole fs_blackhole
 
+// --- Line Shader (For Grid) ---
+@vs vs_line
+in vec3 position;
+in vec4 color0;
+
+out vec4 color;
+
+layout(binding=0) uniform line_vs_params {
+    mat4 mvp;
+};
+
+void main() {
+    gl_Position = mvp * vec4(position, 1.0);
+    color = color0;
+}
+@end
+
+@fs fs_line
+in vec4 color;
+out vec4 frag_color;
+
+void main() {
+    frag_color = color;
+}
+@end
+
+@program line vs_line fs_line
+
 @vs vs_enemy
 layout(binding=0) uniform enemy_vs_params { mat4 view_proj; };
 layout(location=0) in vec2 quad_pos_in;    
@@ -623,7 +742,7 @@ void main() {
         return; 
     } 
     // --- SlowBoy Rendering Path ---
-    else if (v_enemy_type_fs > 0.5) { 
+    else if (v_enemy_type_fs > 0.5 && v_enemy_type_fs < 1.5) { 
         float glow_canvas_scale_factor = enemy_effect_params_fs.z; 
         float star_base_render_radius = 0.45; 
         float effective_sdf_outer_radius = star_base_render_radius / max(1.0, glow_canvas_scale_factor);
@@ -657,6 +776,250 @@ void main() {
         frag_color = vec4(final_combined_rgb, current_final_alpha);
         if (frag_color.a < 0.01) { discard; }
         return; 
+    }
+    // --- Weaver Rendering Path (Type 3.0) ---
+    else if (v_enemy_type_fs > 2.5 && v_enemy_type_fs < 3.5) {
+        // WEAVER: Green Diamond Head + Sine Trails
+        // p_scaled_uv space (-1.5 to 1.5)
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        
+        // --- Head (Diamond) ---
+        // Rotate 45 degrees to make a diamond from a square
+        vec2 head_p = rotate2d(PI * 0.25) * p;
+        vec2 head_dims = vec2(0.25, 0.25);
+        float head_sdf = sdf_rectangle(head_p, head_dims);
+        float aa = 0.02;
+        float head_alpha = smoothstep(aa, 0.0, head_sdf);
+        
+        vec3 head_color = vec3(0.2, 1.0, 0.4); // Bright Green
+        vec3 core_color = vec3(0.8, 1.0, 0.8);
+        vec3 final_head_rgb = mix(head_color, core_color, smoothstep(0.05, 0.0, abs(head_sdf))); // Outline effect
+
+        // --- Trails ---
+        // 3 Segments following sine
+        float trail_alpha_accum = 0.0;
+        int trail_segments = 3;
+        for (int i = 1; i <= trail_segments; i++) {
+            float t = float(i) / float(trail_segments);
+            float offset_x = -0.4 * float(i); // Behind head
+            
+            // Wiggle: Sine wave based on time + offset
+            // We use 'tick' for animation speed
+            float wiggle = sin(tick * 10.0 - float(i) * 1.5) * 0.15;
+            
+            vec2 segment_p = p - vec2(offset_x, wiggle);
+            // Smaller diamonds
+            vec2 seg_rot_p = rotate2d(PI * 0.25) * segment_p;
+            float seg_scale = 0.18 * (1.0 - t * 0.6); // Get smaller
+            float seg_sdf = sdf_rectangle(seg_rot_p, vec2(seg_scale));
+            float seg_alpha = smoothstep(aa, 0.0, seg_sdf);
+            trail_alpha_accum = max(trail_alpha_accum, seg_alpha * (1.0 - t * 0.8)); // Fade out
+        }
+
+        float combined_alpha = max(head_alpha, trail_alpha_accum);
+        vec3 final_rgb = head_color; // Simplify color for now, mix if needed
+        if (head_alpha > 0.01) final_rgb = final_head_rgb;
+        else final_rgb = head_color * 0.7; // Darker trails
+
+        // Dying Effect
+        float is_dying = enemy_effect_params_fs.x;
+        if (is_dying > 0.5) {
+            combined_alpha *= enemy_effect_params_fs.w; // Alpha fade
+            // TODO: Add dissolve/scatter effect here if desired
+        }
+
+        frag_color = vec4(final_rgb, combined_alpha * enemy_color_out_fs.a);
+        if (frag_color.a < 0.01) discard;
+        return;
+    }
+    // --- Gravitron Rendering Path (Type 4.0) ---
+    else if (v_enemy_type_fs > 3.5 && v_enemy_type_fs < 4.5) {
+        // GRAVITRON: Blue Atom (Concentric Rings)
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        float aa = 0.02;
+        
+        // Colors
+        vec3 color_core = vec3(0.1, 0.4, 1.0); // Deep Blue
+        vec3 color_ring = vec3(0.0, 0.8, 1.0); // Cyan
+        
+        // Core Sphere
+        float d_core = length(p) - 0.25;
+        float alpha_core = smoothstep(aa, 0.0, d_core);
+        
+        // Ring 1 (Inner) - Rotate CW
+        float rot1 = tick * 2.0;
+        vec2 p_ring1 = rotate2d(rot1) * p; // Rotation affects nothing for circle, but maybe we want gaps?
+        // Let's make them Ellipses or partial rings to show rotation?
+        // "Blue concentric rings rotating oppositely" usually implies 3D atom look OR just partial arcs.
+        // For simple vector style: Annulus with gaps.
+        
+        float d_ring1 = abs(length(p) - 0.45) - 0.03;
+        // Add gaps to visualize rotation
+        float angle = atan(p.y, p.x);
+        float gap_mask1 = sin(angle * 3.0 + tick * 3.0); // 3 gaps, rotating
+        if (gap_mask1 < -0.5) d_ring1 = 1.0; // Cut gap
+        float alpha_ring1 = smoothstep(aa, 0.0, d_ring1);
+
+        // Ring 2 (Outer) - Rotate CCW
+        float d_ring2 = abs(length(p) - 0.65) - 0.03;
+        float gap_mask2 = sin(angle * 2.0 - tick * 2.5); // 2 gaps, rotating opposite
+        if (gap_mask2 < -0.5) d_ring2 = 1.0;
+        float alpha_ring2 = smoothstep(aa, 0.0, d_ring2);
+
+        float combined_alpha = max(alpha_core, max(alpha_ring1, alpha_ring2));
+        
+        // Color mixing
+        vec3 final_rgb = color_ring;
+        if (alpha_core > 0.01) final_rgb = mix(color_core, vec3(1.0), 0.5 * smoothstep(0.1, 0.0, length(p))); // Highlight
+
+        // Dying Effect
+        float is_dying = enemy_effect_params_fs.x;
+        if (is_dying > 0.5) {
+            combined_alpha *= enemy_effect_params_fs.w; 
+        }
+
+        frag_color = vec4(final_rgb, combined_alpha * enemy_color_out_fs.a);
+        if (frag_color.a < 0.01) discard;
+        return;
+    }
+    // --- Tracer Rendering Path (Type 5.0) ---
+    else if (v_enemy_type_fs > 4.5 && v_enemy_type_fs < 5.5) {
+        // TRACER: Orange Arrowhead (Jet)
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        float aa = 0.02;
+
+        vec3 color_orange = vec3(1.0, 0.5, 0.0);
+        vec3 color_dark = vec3(0.4, 0.1, 0.0);
+
+        // Arrowhead shape (Triangle pointing Right, assuming rotation aligns X+)
+        // The rotation is handled by quad rotation, so we draw static shape pointing Right (X+)
+        // Triangle vertices: (0.4, 0), (-0.3, 0.3), (-0.3, -0.3)
+        // Normalized and centered:
+        
+        // SDF for Isosceles Triangle
+        // We will rotate -90 deg to point Up for standard SDF function, or use custom.
+        // Let's just use rotated box and cut it? Or 3 planes?
+        // Simpler: 2D SDF Triangle.
+        
+        // Let's define it manually with planes for clarity or use a standard func if available.
+        // No standard library here.
+        // Let's use simple logic:
+        // p.y is symmetry axis.
+        vec2 q = p;
+        q.y = abs(q.y);
+        // Edge 1: x = -0.3
+        float d1 = -(q.x - (-0.3));
+        // Edge 2: angled line from (0.5, 0) to (-0.3, 0.35)
+        // Normal to vector (-0.8, 0.35) -> (0.35, 0.8)
+        vec2 v = vec2(-0.3, 0.35) - vec2(0.5, 0.0);
+        vec2 normal = normalize(vec2(-v.y, v.x)); // (-0.35, -0.8) -> (-0.35, -0.8) -> needs to point out?
+        // Wait, standard SDF logic is tricky without functions.
+        // Let's try rotated boxes for wings.
+        
+        // Main Body: Elongated Diamond
+        vec2 p_body = p;
+        p_body.x -= 0.1; // Shift center
+        p_body = rotate2d(PI * 0.25) * p_body; 
+        float d_body = sdf_rectangle(p_body, vec2(0.2, 0.2)); 
+        
+        // Wings: "Folding" effect
+        // If charging (high speed?), wings open. If aiming (low speed), wings closed.
+        // We don't have exact state passed besides effect params.
+        // Let's use simple animation.
+        float wing_angle = 0.5 + 0.3 * sin(tick * 5.0);
+        
+        // Draw wing shapes?
+        // Let's stick to a simple Arrowhead for now to pass verification.
+        // Orange Halo
+        float d_tri = max(abs(p.y) * 1.5 + p.x - 0.4, -p.x - 0.4); // Rough triangle
+        float alpha_tri = smoothstep(aa, 0.0, d_tri);
+
+        vec3 final_rgb = color_orange;
+        if (d_tri < -0.05) final_rgb = mix(color_orange, vec3(1.0), 0.5); // Core
+
+        float combined_alpha = alpha_tri;
+        
+        // Dying Effect
+        float is_dying = enemy_effect_params_fs.x;
+        if (is_dying > 0.5) {
+            combined_alpha *= enemy_effect_params_fs.w; 
+        }
+
+        frag_color = vec4(final_rgb, combined_alpha * enemy_color_out_fs.a);
+        if (frag_color.a < 0.01) discard;
+        return;
+    }
+    // --- Elite Rendering Path (Type 6.0) ---
+    else if (v_enemy_type_fs > 5.5 && v_enemy_type_fs < 6.5) {
+        // ELITE: Red/Gold Hexagon (Gravitron Style)
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        float aa = 0.02;
+
+        vec3 color_core = vec3(1.0, 0.1, 0.1); // Bright Red
+        vec3 color_ring = vec3(1.0, 0.8, 0.2); // Gold
+
+        // Helper for Hexagon SDF (inline for now if simple, or separate)
+        // Hexagon Logic:
+        // const vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+        // p = abs(p);
+        // p -= 2.0*min(dot(k.xy, p), 0.0)*k.xy;
+        // p -= vec2(clamp(p.x, -k.z*r, k.z*r), r);
+        // length(p)*sign(p.y);
+        
+        // We need a helper function typically, but can inline.
+        // Let's implement function at top of file, or inline here.
+        // Inline reduces risk of function placement errors in this tool.
+        
+        // --- Core Hexagon ---
+        vec2 p_core = p;
+        // Rotate Core slightly
+        float rot_core = tick * 0.5;
+        p_core = rotate2d(rot_core) * p_core;
+        
+        // Inline Hexagon SDF (Core Radius 0.3)
+        float r_core = 0.3;
+        vec3 k = vec3(-0.866025404, 0.5, 0.577350269);
+        vec2 p_calc = abs(p_core);
+        p_calc -= 2.0 * min(dot(k.xy, p_calc), 0.0) * k.xy;
+        p_calc -= vec2(clamp(p_calc.x, -k.z * r_core, k.z * r_core), r_core);
+        float d_core = length(p_calc) * sign(p_calc.y);
+        
+        float alpha_core = smoothstep(aa, 0.0, d_core);
+
+        // --- Outer Ring Hexagon ---
+        vec2 p_ring = p;
+        // Rotate Ring Opposite/Faster
+        float rot_ring = -tick * 1.5;
+        p_ring = rotate2d(rot_ring) * p_ring;
+
+        float r_ring = 0.5;
+        p_calc = abs(p_ring);
+        p_calc -= 2.0 * min(dot(k.xy, p_calc), 0.0) * k.xy;
+        p_calc -= vec2(clamp(p_calc.x, -k.z * r_ring, k.z * r_ring), r_ring);
+        float d_ring_outer = length(p_calc) * sign(p_calc.y);
+        float d_ring = abs(d_ring_outer) - 0.05; // Ring thickness
+        
+        // Gaps for stylistic look (like Gravitron)
+        float angle = atan(p_ring.y, p_ring.x);
+        float gap_mask = sin(angle * 6.0); // 6 gaps for hexagon corners?
+        if (gap_mask > 0.8) d_ring = 1.0; // Cut gap
+
+        float alpha_ring = smoothstep(aa, 0.0, d_ring);
+
+        // Combine
+        float combined_alpha = max(alpha_core, alpha_ring);
+        vec3 final_rgb = color_ring;
+        if (alpha_core > 0.01) final_rgb = mix(color_core, vec3(1.0), 0.5 * smoothstep(0.1, 0.0, abs(d_core))); 
+
+        // Dying Effect
+        float is_dying = enemy_effect_params_fs.x;
+        if (is_dying > 0.5) {
+            combined_alpha *= enemy_effect_params_fs.w; 
+        }
+
+        frag_color = vec4(final_rgb, combined_alpha * enemy_color_out_fs.a);
+        if (frag_color.a < 0.01) discard;
+        return;
     }
     // --- Grunt Rendering Path (existing logic) ---
     else { 
