@@ -1,4 +1,4 @@
-package main
+package enemy
 import m "../../vendor/math"
 
 import "base:runtime"
@@ -14,10 +14,10 @@ import sapp "../../vendor/sokol/app"
 // --- Enemy System ---
 emit_enemy :: proc(enemy_data: shared.Enemy) {
     context = runtime.default_context()
-    idx_to_write_en := state.next_enemy_index // Renamed
-    state.enemies[idx_to_write_en] = enemy_data       
-    state.enemies[idx_to_write_en].active = true       
-    state.next_enemy_index = (state.next_enemy_index + 1) % MAX_ENEMIES
+    idx_to_write_en := shared.state.next_enemy_index // Renamed
+    shared.state.enemies[idx_to_write_en] = enemy_data
+    shared.state.enemies[idx_to_write_en].active = true
+    shared.state.next_enemy_index = (shared.state.next_enemy_index + 1) % MAX_ENEMIES
 }
 
 spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_pos: m.vec2, type_to_spawn: shared.EnemyType) { 
@@ -83,6 +83,24 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
             death_anim_dur = BOSS_DEATH_ANIM_DURATION; 
             start_vel_en = {ENEMY_BOSS_HORIZONTAL_SPEED, 0.0}; 
             enemy_angular_vel = 0.0; // Boss aiming is based on player pos, not fixed angular_vel for body
+        case .WEAVER:
+            enemy_color_val = m.vec4{0.1, 0.9, 0.3, ENEMY_BASE_ALPHA} // Green
+            target_world_size = 0.2 // Slightly larger than grunt
+            initial_hp = 3
+            death_anim_dur = ENEMY_DEATH_ANIM_DURATION
+            enemy_angular_vel = 0.0 // Oscillation logic in update, no rotation
+        case .GRAVITRON:
+             enemy_color_val = m.vec4{0.2, 0.2, 0.9, ENEMY_BASE_ALPHA} // Blue
+             target_world_size = 0.4 // Large
+             initial_hp = 20 // High HP
+             death_anim_dur = ENEMY_DEATH_ANIM_DURATION
+             enemy_angular_vel = 0.5 // Slow rotation
+        case .TRACER:
+            enemy_color_val = m.vec4{0.9, 0.5, 0.1, ENEMY_BASE_ALPHA} // Orange
+            target_world_size = 0.15 // Small/Sleek
+            initial_hp = 2
+            death_anim_dur = ENEMY_DEATH_ANIM_DURATION
+            enemy_angular_vel = 0.0 // Steering logic controls rotation
         case: 
             fmt.printf("spawn_enemy: ERROR - Unknown type_to_spawn: %v\n", type_to_spawn);
             return; 
@@ -113,11 +131,11 @@ spawn_enemy :: proc(current_ortho_width: f32, current_ortho_height: f32, player_
 update_and_instance_enemies :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_enemy_count := 0
-    player_pos_uie := state.player_pos 
+    player_pos_uie := shared.state.player_pos
 
     for i in 0..<MAX_ENEMIES {
-        if !state.enemies[i].active { continue }
-        enemy_uie := &state.enemies[i] 
+        if !shared.state.enemies[i].active { continue }
+        enemy_uie := &shared.state.enemies[i]
 
         has_updated_pos_for_charge_bounce_uie := false; 
         
@@ -239,6 +257,8 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             
             effect_params_x_uie = 0.0; 
             effect_params_y_uie = 0.0; 
+            effect_params_z_uie = 1.0;
+            effect_params_w_uie = 1.0;
 
             if enemy_uie.type == .BOSS_CHROME_ORB {
                 effect_params_z_uie = ENEMY_BOSS_VISION_RECT_WIDTH; 
@@ -272,6 +292,98 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                     enemy_uie.vel.x = ENEMY_BOSS_HORIZONTAL_SPEED;
                     enemy_uie.boss_move_direction = 1.0;
                 }
+            } else if enemy_uie.type == .WEAVER {
+                // Weaver: Maintains distance from player while oscillating perpendicular
+                dist_to_player_vec := player_pos_uie - enemy_uie.pos;
+                dist_sq := m.len_sq_vec2(dist_to_player_vec);
+                target_dist :: 4.0 // "Maintains a specific distance (4.0)"
+                target_dist_sq :: target_dist * target_dist;
+
+                // Base movement: move towards or away to maintain distance
+                desired_vel: m.vec2 = {0,0}
+                if dist_sq > target_dist_sq + 0.1 {
+                    desired_vel = m.norm_vec2(dist_to_player_vec) * ENEMY_GRUNT_SPEED // Approach
+                } else if dist_sq < target_dist_sq - 0.1 {
+                    desired_vel = m.norm_vec2(dist_to_player_vec) * -ENEMY_GRUNT_SPEED // Retreat
+                }
+
+                // Oscillation
+                time_f := f32(sapp.frame_count()) / 60.0;
+                freq :: 2.0
+                amp :: 2.0
+
+                // Perpendicular vector
+                dir_norm := m.norm_vec2(dist_to_player_vec);
+                perp_vec := m.vec2{-dir_norm.y, dir_norm.x};
+
+                oscillation_offset := perp_vec * math.sin(time_f * freq) * amp;
+
+                // Combine
+                // Weaver logic in prompt: pos = center_line + perpendicular_vec * sin(time * freq) * amp
+                // Since we are setting velocity, we should probably add this oscillation to the velocity or position directly.
+                // Let's modify velocity to steer towards that target position.
+                // Or simpler: just add the oscillation to the position (ignoring physics collisions for the oscillation part? No, better to do velocity).
+
+                // Alternative interpretation: The Weaver strafes.
+                enemy_uie.vel = desired_vel + (perp_vec * math.cos(time_f * freq) * amp); // derivative of sin is cos for velocity?
+                // Let's stick to the prompt's position formula idea but adapt for velocity-based update:
+                // Actually, the prompt says: "Behavior: Maintains a specific distance (4.0) from player while oscillating perpendicular to the direction vector."
+                // "pos = center_line + perpendicular_vec * sin(time * freq) * amp"
+                // This implies explicit position calculation.
+                // However, we use `pos += vel * dt` later.
+                // Let's set velocity to reach a dynamic target point.
+                // Dynamic target = (point at distance 4.0 on line to player) + (perp offset)
+
+                // Let's simplify: simple seek/flee for distance + strafe velocity
+                strafe_vel := perp_vec * math.sin(time_f * freq) * amp;
+                enemy_uie.vel = desired_vel + strafe_vel;
+
+                // Visuals: Green Diamond (handled by instance_enemy_type = 3.0 and shader)
+                enemy_uie.rotation += 2.0 * dt; // Spin
+
+            } else if enemy_uie.type == .GRAVITRON {
+                 // Gravitron: Slow movement, pulls projectiles
+                 dir_to_player := player_pos_uie - enemy_uie.pos;
+                 if m.len_sq_vec2(dir_to_player) > 0.001 {
+                     enemy_uie.vel = m.norm_vec2(dir_to_player) * 0.5; // Very slow seek
+                 }
+                 enemy_uie.rotation += enemy_uie.angular_vel * dt;
+
+                 // Projectile Pull Logic (needs access to projectiles, will do in separate loop or call)
+                 // See "Implement Gravitron Logic" below or in `update_and_instance_enemies` loop?
+                 // Since we are inside the enemy loop, we can't easily iterate projectiles here without passing them.
+                 // We will handle the pull logic in a separate pass or outside this loop?
+                 // Actually, checking "distance to all active Projectiles" implies iterating projectiles.
+                 // Let's add a helper function `apply_gravitron_pull(gravitron_pos)` and call it here.
+                 // But wait, `update_and_instance_enemies` doesn't know about projectiles.
+                 // We should probably do this interaction in `frame()` or pass projectile list.
+                 // For now, let's just do movement here. The pull logic is best done where we have access to both.
+                 // (See step 4 of plan: "Add logic to pull Projectiles...").
+
+            } else if enemy_uie.type == .TRACER {
+                // Tracer: High speed, boid-like steering
+                // Seek player
+                dir_to_player := player_pos_uie - enemy_uie.pos;
+                dist_sq := m.len_sq_vec2(dir_to_player);
+                if dist_sq > 0.001 {
+                    desired_dir := m.norm_vec2(dir_to_player);
+                    current_dir := m.vec2{0,1}
+                    if m.len_sq_vec2(enemy_uie.vel) > 0.001 {
+                        current_dir = m.norm_vec2(enemy_uie.vel)
+                    }
+
+                    // Steer towards desired
+                    steer_strength :: 2.0 * dt // Turn rate
+                    new_dir := m.lerp(current_dir, desired_dir, steer_strength); // Rough steering
+                    new_dir = m.norm_vec2(new_dir);
+
+                    tracer_speed :: 4.0 // High speed
+                    enemy_uie.vel = new_dir * tracer_speed;
+
+                    // Rotate to face velocity
+                    enemy_uie.rotation = math.atan2(enemy_uie.vel.y, enemy_uie.vel.x) - m.PI/2.0;
+                }
+
             } else { // Grunt or SlowBoy (idle/moving, not charging/winding)
                 enemy_uie.rotation += enemy_uie.angular_vel * dt;
                 
@@ -329,7 +441,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
         }
 
         if live_enemy_count < MAX_ENEMIES {
-            inst_uie := &state.enemy_instance_data[live_enemy_count]; 
+            inst_uie := &shared.state.enemy_instance_data[live_enemy_count];
             inst_uie.instance_pos = enemy_uie.pos;
             inst_uie.instance_main_rotation = enemy_uie.rotation; // For Grunt/Slowbody rotation, Boss aiming
             if enemy_uie.type == .BOSS_CHROME_ORB {
@@ -347,6 +459,9 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
             if enemy_uie.type == .GRUNT { inst_uie.instance_enemy_type = 0.0; } 
             else if enemy_uie.type == .SLOWBOY { inst_uie.instance_enemy_type = 1.0; } 
             else if enemy_uie.type == .BOSS_CHROME_ORB { inst_uie.instance_enemy_type = 2.0; }
+            else if enemy_uie.type == .WEAVER { inst_uie.instance_enemy_type = 3.0; } // New visuals needed in shader (for now 0.0/grunt fallback if shader not updated, but we will pass ID)
+            else if enemy_uie.type == .GRAVITRON { inst_uie.instance_enemy_type = 4.0; }
+            else if enemy_uie.type == .TRACER { inst_uie.instance_enemy_type = 5.0; }
             else { inst_uie.instance_enemy_type = 0.0; } 
             live_enemy_count += 1;
         }

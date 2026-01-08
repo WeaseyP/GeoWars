@@ -1,7 +1,7 @@
-package main
+package shared
 
 import m "../vendor/math"
-import ma "../vendor/miniaudio"
+import ma "../../vendor/miniaudio"
 import "base:runtime"
 
 
@@ -10,6 +10,9 @@ import "base:runtime"
 EnemyType :: enum {
     GRUNT,
     SLOWBOY,
+    WEAVER,
+    GRAVITRON,
+    TRACER,
     BOSS_CHROME_ORB,
 }
 

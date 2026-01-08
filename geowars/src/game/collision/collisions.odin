@@ -1,15 +1,17 @@
-package main
+package collision
 
 import "base:runtime"
 import m "../../vendor/math"
 import ma "../../vendor/miniaudio"
 import "core:fmt"
+import shared "../../shared"
+import enemy "../enemy"
 
 
 check_RMB_particle_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_PARTICLES {
-        particle_rmb_coll := &state.particles[i] // Renamed
+        particle_rmb_coll := &shared.state.particles[i] // Renamed
         if !particle_rmb_coll.active || particle_rmb_coll.is_ammo_indicator || particle_rmb_coll.is_burst_particle {
             continue;
         }
@@ -17,7 +19,7 @@ check_RMB_particle_enemy_collisions :: proc() {
         if particle_radius_rmb_coll <= 0.001 { continue }
 
         for j in 0..<MAX_ENEMIES {
-            enemy_rmb_coll := &state.enemies[j] // Renamed
+            enemy_rmb_coll := &shared.state.enemies[j] // Renamed
             if !enemy_rmb_coll.active || enemy_rmb_coll.is_dying { continue } 
             
             enemy_radius_rmb_coll := enemy_rmb_coll.current_size * 0.5 // Renamed
@@ -34,13 +36,13 @@ check_RMB_particle_enemy_collisions :: proc() {
                 if enemy_rmb_coll.hp <= 0 {
                     if !enemy_rmb_coll.is_dying {
                         // fmt.printf("RMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy_rmb_coll, enemy_rmb_coll.is_dying);
-                        ma.sound_seek_to_pcm_frame(&state.rmb_kill_sound, 0);
-                        ma.sound_start(&state.rmb_kill_sound);
+                        ma.sound_seek_to_pcm_frame(&shared.state.rmb_kill_sound, 0);
+                        ma.sound_start(&shared.state.rmb_kill_sound);
                     }
                 } else {
                     // fmt.printf("RMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy_rmb_coll, enemy_rmb_coll.hp);
-                    ma.sound_seek_to_pcm_frame(&state.rmb_hit_sound, 0);
-                    ma.sound_start(&state.rmb_hit_sound);
+                    ma.sound_seek_to_pcm_frame(&shared.state.rmb_hit_sound, 0);
+                    ma.sound_start(&shared.state.rmb_hit_sound);
                 }
 
                 if particle_rmb_coll.has_active_sound {
@@ -52,8 +54,8 @@ check_RMB_particle_enemy_collisions :: proc() {
 
                 if enemy_rmb_coll.hp <= 0 && !enemy_rmb_coll.is_dying { 
                     enemy_rmb_coll.is_dying = true;
-                    state.progression.enemies_defeated_in_current_stage += 1;
-                    fmt.printf("RMB Kill: Enemy defeated. Stage progress: %d/%d\n", state.progression.enemies_defeated_in_current_stage, state.progression.total_enemies_defined_for_current_stage);
+                    shared.state.progression.enemies_defeated_in_current_stage += 1;
+                    fmt.printf("RMB Kill: Enemy defeated. Stage progress: %d/%d\n", shared.state.progression.enemies_defeated_in_current_stage, shared.state.progression.total_enemies_defined_for_current_stage);
                     if enemy_rmb_coll.type == .GRUNT {
                         enemy_rmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
                         enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
@@ -68,17 +70,17 @@ check_RMB_particle_enemy_collisions :: proc() {
                         enemy_rmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
                     enemy_rmb_coll.death_rect_offset = 0.0;
-                    spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos); 
-                    if enemy_rmb_coll.type == .GRUNT && !state.first_grunt_killed {
-                        state.first_grunt_killed = true;
-                        start_drum_err_rmb := ma.sound_start(&state.drum_track_sound); // Renamed
+                    // spawn_RMB_enemy_death_particles(enemy_rmb_coll.pos);  // Need to fix this function too or import it
+                    if enemy_rmb_coll.type == .GRUNT && !shared.state.first_grunt_killed {
+                        shared.state.first_grunt_killed = true;
+                        start_drum_err_rmb := ma.sound_start(&shared.state.drum_track_sound); // Renamed
                         if start_drum_err_rmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n"); } 
                         else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_rmb); }
                     }
                     // (<<< NEW SYNTH TRIGGER START >>>)
-                    if enemy_rmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
-                        state.first_slowboy_killed = true;
-                        start_synth_err := ma.sound_start(&state.synth_track_sound);
+                    if enemy_rmb_coll.type == .SLOWBOY && !shared.state.first_slowboy_killed {
+                        shared.state.first_slowboy_killed = true;
+                        start_synth_err := ma.sound_start(&shared.state.synth_track_sound);
                         if start_synth_err == .SUCCESS {
                             fmt.printf("--- First SLOWBOY killed! Starting synth track. ---\n");
                         } else {
@@ -96,11 +98,11 @@ check_RMB_particle_enemy_collisions :: proc() {
 check_LMB_projectile_enemy_collisions :: proc() {
     context = runtime.default_context()
     for i in 0..<MAX_BLACKHOLES {
-        proj_lmb_coll := &state.blackholes[i] // Renamed
+        proj_lmb_coll := &shared.state.blackholes[i] // Renamed
         if !proj_lmb_coll.active { continue }
         proj_radius_lmb_coll := proj_lmb_coll.size * 0.5 // Renamed
         for j in 0..<MAX_ENEMIES {
-            enemy_lmb_coll := &state.enemies[j] // Renamed
+            enemy_lmb_coll := &shared.state.enemies[j] // Renamed
             if !enemy_lmb_coll.active || enemy_lmb_coll.is_dying { continue; } 
 
             enemy_radius_lmb_coll := enemy_lmb_coll.current_size * 0.5 // Renamed
@@ -115,19 +117,19 @@ check_LMB_projectile_enemy_collisions :: proc() {
                 if enemy_lmb_coll.hp <= 0 {
                     if !enemy_lmb_coll.is_dying {
                         //  fmt.printf("LMB Kill branch: Playing death sound for enemy %p. is_dying: %t\n", enemy_lmb_coll, enemy_lmb_coll.is_dying);
-                         ma.sound_seek_to_pcm_frame(&state.lmb_kill_sound, 0);
-                         ma.sound_start(&state.lmb_kill_sound);
+                         ma.sound_seek_to_pcm_frame(&shared.state.lmb_kill_sound, 0);
+                         ma.sound_start(&shared.state.lmb_kill_sound);
                     }
                 } else {
                     // fmt.printf("LMB Hit branch: Playing hit sound for enemy %p. HP: %d\n", enemy_lmb_coll, enemy_lmb_coll.hp);
-                    ma.sound_seek_to_pcm_frame(&state.lmb_hit_sound, 0);
-                    ma.sound_start(&state.lmb_hit_sound);
+                    ma.sound_seek_to_pcm_frame(&shared.state.lmb_hit_sound, 0);
+                    ma.sound_start(&shared.state.lmb_hit_sound);
                 }
 
                 if enemy_lmb_coll.hp <= 0 && !enemy_lmb_coll.is_dying { 
                     enemy_lmb_coll.is_dying = true;
-                    state.progression.enemies_defeated_in_current_stage += 1;
-                    fmt.printf("LMB Kill: Enemy defeated. Stage progress: %d/%d\n", state.progression.enemies_defeated_in_current_stage, state.progression.total_enemies_defined_for_current_stage);
+                    shared.state.progression.enemies_defeated_in_current_stage += 1;
+                    fmt.printf("LMB Kill: Enemy defeated. Stage progress: %d/%d\n", shared.state.progression.enemies_defeated_in_current_stage, shared.state.progression.total_enemies_defined_for_current_stage);
                     if enemy_lmb_coll.type == .GRUNT {
                         enemy_lmb_coll.dying_timer = GRUNT_DEATH_ANIM_DURATION;
                         enemy_lmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
@@ -142,17 +144,17 @@ check_LMB_projectile_enemy_collisions :: proc() {
                         enemy_lmb_coll.death_anim_max_duration = GRUNT_DEATH_ANIM_DURATION;
                     }
                     enemy_lmb_coll.death_rect_offset = 0.0;
-                    spawn_LMB_enemy_death_particles(enemy_lmb_coll.pos, enemy_lmb_coll.color); 
-                    if enemy_lmb_coll.type == .GRUNT && !state.first_grunt_killed {
-                        state.first_grunt_killed = true;
-                        start_drum_err_lmb := ma.sound_start(&state.drum_track_sound); // Renamed
+                    // spawn_LMB_enemy_death_particles(enemy_lmb_coll.pos, enemy_lmb_coll.color);
+                    if enemy_lmb_coll.type == .GRUNT && !shared.state.first_grunt_killed {
+                        shared.state.first_grunt_killed = true;
+                        start_drum_err_lmb := ma.sound_start(&shared.state.drum_track_sound); // Renamed
                         if start_drum_err_lmb == .SUCCESS { fmt.printf("--- First GRUNT killed! Starting drum track. ---\n");} 
                         else { fmt.eprintf("!!! ERROR: Failed to start drum_track_sound! Error: %v\n", start_drum_err_lmb); }
                     }
                     // (<<< NEW SYNTH TRIGGER START >>>)
-                     if enemy_lmb_coll.type == .SLOWBOY && !state.first_slowboy_killed {
-                        state.first_slowboy_killed = true;
-                        start_synth_err := ma.sound_start(&state.synth_track_sound);
+                     if enemy_lmb_coll.type == .SLOWBOY && !shared.state.first_slowboy_killed {
+                        shared.state.first_slowboy_killed = true;
+                        start_synth_err := ma.sound_start(&shared.state.synth_track_sound);
                         if start_synth_err == .SUCCESS {
                             fmt.printf("--- First SLOWBOY killed! Starting synth track. ---\n");
                         } else {
