@@ -84,6 +84,30 @@ void main() { // fs_bg main
             }
         }
         vec3 final_color = fnc * 0.9 + star_light * star_mask;
+
+        // --- Arena Ring overlay ---
+        // Convert pixel coords to world coords (matches Odin ORTHO_HEIGHT = 1.5).
+        // World y range: -1.5 .. +1.5 (vertical), x scales by aspect ratio.
+        // gl_FragCoord origin is bottom-left in GL but top-left in HLSL — sokol-shdc's GLSL stays GL-style.
+        const float ORTHO_H = 1.5;
+        const float ARENA_R = ORTHO_H * 1.4;        // matches shared.ARENA_RADIUS
+        const float RING_HALF_W = 0.018;            // half-thickness of the visible ring
+        vec2 ndc = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
+        vec2 world_pos = vec2(ndc.x * (resolution.x / resolution.y) * ORTHO_H, ndc.y * ORTHO_H);
+        float dist_from_center = length(world_pos);
+
+        // Anti-aliased ring: peak intensity at ARENA_R, falls off over RING_HALF_W on each side.
+        float ring_d = abs(dist_from_center - ARENA_R);
+        float ring_alpha = 1.0 - smoothstep(0.0, RING_HALF_W, ring_d);
+
+        // Subtle outside-arena darkening so the play area visually "pops".
+        float outside_factor = smoothstep(ARENA_R, ARENA_R + 0.15, dist_from_center);
+        final_color *= mix(1.0, 0.55, outside_factor);
+
+        // Ring colour: cyan-ish glow that pulses gently with time.
+        vec3 ring_color = vec3(0.55, 0.85, 1.0) * (0.85 + 0.15 * sin(time * 1.5));
+        final_color = mix(final_color, ring_color, ring_alpha * 0.95);
+
         frag_color = vec4(clamp(final_color, 0.0, 1.0), 1.0);
     }
 }

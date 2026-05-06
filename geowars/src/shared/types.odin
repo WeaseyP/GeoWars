@@ -1,4 +1,4 @@
-package main
+package shared
 
 import m "../vendor/math"
 import ma "../vendor/miniaudio"

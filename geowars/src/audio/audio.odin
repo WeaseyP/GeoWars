@@ -1,4 +1,4 @@
-package main
+package audio
 
 import ma "../vendor/miniaudio"
 import m "../vendor/math"
@@ -8,6 +8,7 @@ import sa "../vendor/sokol/audio"
 import rand "core:math/rand"
 import "base:runtime"
 import "core:c"
+import shared "../shared"
 
 
 // --- Global Variables and Constants ---
@@ -76,7 +77,7 @@ drum_track_pcm_data: []f32
 drum_track_audio_buffer: ma.audio_buffer
 
 // SYNTH TRACK DEFINITIONS
-SYNTH_TRACK_SAMPLE_RATE :: DRUM_TRACK_SAMPLE_rate
+SYNTH_TRACK_SAMPLE_RATE :: DRUM_TRACK_SAMPLE_RATE
 SYNTH_TRACK_CHANNELS :: DRUM_TRACK_CHANNELS
 SYNTH_TRACK_BPM :: DRUM_TRACK_BPM
 SYNTH_TRACK_BEATS_PER_BAR :: DRUM_TRACK_BEATS_PER_BAR
@@ -229,7 +230,7 @@ init_audio :: proc() {
     engine_config.channels = u32(LMB_SOUND_CHANNELS)   
     engine_config.sampleRate = u32(LMB_SOUND_SAMPLE_RATE) 
 
-    init_result := ma.engine_init(&engine_config, &state.audio_engine)
+    init_result := ma.engine_init(&engine_config, &shared.state.audio_engine)
     if init_result != .SUCCESS {
         fmt.eprintf("!!! CRITICAL: Miniaudio engine_init failed! Error: %v\n", init_result)
     } else {
@@ -275,7 +276,7 @@ init_audio :: proc() {
         sound_flags_lmb: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION } // Renamed
         p_data_source_for_lmb_sound := (^ma.data_source)(&lmb_sound_audio_buffer) // Renamed
 
-        init_sound_result_lmb := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_for_lmb_sound, sound_flags_lmb, nil, &state.lmb_sound) // Renamed
+        init_sound_result_lmb := ma.sound_init_from_data_source(&shared.state.audio_engine, p_data_source_for_lmb_sound, sound_flags_lmb, nil, &shared.state.lmb_sound) // Renamed
         if init_sound_result_lmb != .SUCCESS {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_sound failed! Error: %v\n", init_sound_result_lmb)
             ma.audio_buffer_uninit(&lmb_sound_audio_buffer); 
@@ -344,9 +345,9 @@ init_audio :: proc() {
         fmt.printf("--- Enemy Hit audio_buffer initialized. ---\n")
         sound_flags_rmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
         p_data_source_rmb_hit := (^ma.data_source)(&enemy_hit_sound_audio_buffer);
-        init_rmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_rmb_hit, sound_flags_rmb_hit, nil, &state.rmb_hit_sound);
+        init_rmb_hit_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_data_source_rmb_hit, sound_flags_rmb_hit, nil, &shared.state.rmb_hit_sound);
         if init_rmb_hit_sound_result == .SUCCESS {
-            ma.sound_set_volume(&state.rmb_hit_sound, ENEMY_HIT_SOUND_AMPLITUDE);
+            ma.sound_set_volume(&shared.state.rmb_hit_sound, ENEMY_HIT_SOUND_AMPLITUDE);
             fmt.printf("--- Miniaudio rmb_hit_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_HIT_SOUND_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_hit_sound failed! Error: %v\n", init_rmb_hit_sound_result);
@@ -390,9 +391,9 @@ init_audio :: proc() {
         fmt.printf("--- Enemy Death audio_buffer initialized. ---\n")
         sound_flags_rmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
         p_data_source_rmb_kill := (^ma.data_source)(&enemy_death_sound_audio_buffer);
-        init_rmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_rmb_kill, sound_flags_rmb_kill, nil, &state.rmb_kill_sound);
+        init_rmb_kill_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_data_source_rmb_kill, sound_flags_rmb_kill, nil, &shared.state.rmb_kill_sound);
         if init_rmb_kill_sound_result == .SUCCESS {
-            ma.sound_set_volume(&state.rmb_kill_sound, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
+            ma.sound_set_volume(&shared.state.rmb_kill_sound, ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
             fmt.printf("--- Miniaudio rmb_kill_sound initialized successfully (Volume: %.2f) ---\n", ENEMY_DEATH_SOUND_SINE_AMPLITUDE + ENEMY_DEATH_SOUND_NOISE_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for rmb_kill_sound failed! Error: %v\n", init_rmb_kill_sound_result);
@@ -425,9 +426,9 @@ init_audio :: proc() {
         fmt.printf("--- LMB Hit Whoosh audio_buffer initialized. ---\n")
         sound_flags_lmb_hit: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
         p_data_source_lmb_hit := (^ma.data_source)(&lmb_hit_whoosh_audio_buffer);
-        init_lmb_hit_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_hit, sound_flags_lmb_hit, nil, &state.lmb_hit_sound);
+        init_lmb_hit_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_data_source_lmb_hit, sound_flags_lmb_hit, nil, &shared.state.lmb_hit_sound);
         if init_lmb_hit_sound_result == .SUCCESS {
-            ma.sound_set_volume(&state.lmb_hit_sound, LMB_HIT_WHOOSH_AMPLITUDE);
+            ma.sound_set_volume(&shared.state.lmb_hit_sound, LMB_HIT_WHOOSH_AMPLITUDE);
             fmt.printf("--- Miniaudio lmb_hit_sound initialized successfully (Volume: %.2f) ---\n", LMB_HIT_WHOOSH_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_hit_sound failed! Error: %v\n", init_lmb_hit_sound_result);
@@ -474,9 +475,9 @@ init_audio :: proc() {
         fmt.printf("--- LMB Kill Explosion audio_buffer initialized. ---\n")
         sound_flags_lmb_kill: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
         p_data_source_lmb_kill := (^ma.data_source)(&lmb_kill_explosion_audio_buffer);
-        init_lmb_kill_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_data_source_lmb_kill, sound_flags_lmb_kill, nil, &state.lmb_kill_sound);
+        init_lmb_kill_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_data_source_lmb_kill, sound_flags_lmb_kill, nil, &shared.state.lmb_kill_sound);
         if init_lmb_kill_sound_result == .SUCCESS {
-            ma.sound_set_volume(&state.lmb_kill_sound, LMB_KILL_EXPLOSION_AMPLITUDE);
+            ma.sound_set_volume(&shared.state.lmb_kill_sound, LMB_KILL_EXPLOSION_AMPLITUDE);
             fmt.printf("--- Miniaudio lmb_kill_sound initialized successfully (Volume: %.2f) ---\n", LMB_KILL_EXPLOSION_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for lmb_kill_sound failed! Error: %v\n", init_lmb_kill_sound_result);
@@ -493,10 +494,10 @@ init_audio :: proc() {
         fmt.printf("--- Drum Track audio_buffer initialized. ---\n")
         drum_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }; 
         p_drum_track_data_source := (^ma.data_source)(&drum_track_audio_buffer);
-        init_drum_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_drum_track_data_source, drum_track_sound_flags, nil, &state.drum_track_sound);
+        init_drum_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_drum_track_data_source, drum_track_sound_flags, nil, &shared.state.drum_track_sound);
         if init_drum_sound_result == .SUCCESS {
-            ma.sound_set_looping(&state.drum_track_sound, true); 
-            ma.sound_set_volume(&state.drum_track_sound, DRUM_TRACK_AMPLITUDE); 
+            ma.sound_set_looping(&shared.state.drum_track_sound, true); 
+            ma.sound_set_volume(&shared.state.drum_track_sound, DRUM_TRACK_AMPLITUDE); 
             fmt.printf("--- Miniaudio drum_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", DRUM_TRACK_AMPLITUDE);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for drum_track_sound failed! Error: %v\n", init_drum_sound_result);
@@ -596,10 +597,10 @@ init_audio :: proc() {
         fmt.printf("--- Synth Track audio_buffer initialized. ---\n");
         synth_track_sound_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION };
         p_synth_track_data_source := (^ma.data_source)(&synth_track_audio_buffer);
-        init_synth_sound_result := ma.sound_init_from_data_source(&state.audio_engine, p_synth_track_data_source, synth_track_sound_flags, nil, &state.synth_track_sound);
+        init_synth_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_synth_track_data_source, synth_track_sound_flags, nil, &shared.state.synth_track_sound);
         if init_synth_sound_result == .SUCCESS {
-            ma.sound_set_looping(&state.synth_track_sound, true);
-            ma.sound_set_volume(&state.synth_track_sound, 1.0); // PCM data already has SYNTH_TRACK_AMPLITUDE baked in, so master volume is 1.0 unless further adjustment needed
+            ma.sound_set_looping(&shared.state.synth_track_sound, true);
+            ma.sound_set_volume(&shared.state.synth_track_sound, 1.0); // PCM data already has SYNTH_TRACK_AMPLITUDE baked in, so master volume is 1.0 unless further adjustment needed
             fmt.printf("--- Miniaudio synth_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", 1.0);
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for synth_track_sound failed! Error: %v\n", init_synth_sound_result);
@@ -611,5 +612,34 @@ init_audio :: proc() {
 }
 
 geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_channels: c.int, user_data: rawptr) {
-    ma.engine_read_pcm_frames(&state.audio_engine, buffer, u64(num_frames), nil)
+    ma.engine_read_pcm_frames(&shared.state.audio_engine, buffer, u64(num_frames), nil)
+}
+
+cleanup_audio :: proc() {
+    ma.sound_uninit(&shared.state.lmb_sound); fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_sound_audio_buffer); fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
+
+    ma.audio_buffer_uninit(&rmb_hum_audio_buffer); fmt.printf("--- RMB Hum global audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&rmb_whoosh_audio_buffer); fmt.printf("--- RMB Whoosh global audio_buffer uninitialized ---\n")
+
+    ma.audio_buffer_uninit(&enemy_hit_sound_audio_buffer); fmt.printf("--- Enemy Hit audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&enemy_death_sound_audio_buffer); fmt.printf("--- Enemy Death audio_buffer uninitialized ---\n")
+
+    ma.audio_buffer_uninit(&lmb_hit_whoosh_audio_buffer); fmt.printf("--- LMB Hit Whoosh audio_buffer uninitialized ---\n")
+    ma.audio_buffer_uninit(&lmb_kill_explosion_audio_buffer); fmt.printf("--- LMB Kill Explosion audio_buffer uninitialized ---\n")
+
+    delete(drum_track_pcm_data); fmt.printf("--- Drum track PCM data slice deleted ---\n")
+    ma.audio_buffer_uninit(&drum_track_audio_buffer); fmt.printf("--- Drum Track audio_buffer uninitialized ---\n")
+
+    delete(synth_track_pcm_data); fmt.printf("--- Synth track PCM data slice deleted ---\n")
+    ma.audio_buffer_uninit(&synth_track_audio_buffer); fmt.printf("--- Synth Track audio_buffer uninitialized ---\n")
+
+    ma.sound_uninit(&shared.state.lmb_hit_sound); fmt.printf("--- Miniaudio lmb_hit_sound uninitialized ---\n")
+    ma.sound_uninit(&shared.state.lmb_kill_sound); fmt.printf("--- Miniaudio lmb_kill_sound uninitialized ---\n")
+    ma.sound_uninit(&shared.state.rmb_hit_sound); fmt.printf("--- Miniaudio rmb_hit_sound uninitialized ---\n")
+    ma.sound_uninit(&shared.state.rmb_kill_sound); fmt.printf("--- Miniaudio rmb_kill_sound uninitialized ---\n")
+    ma.sound_uninit(&shared.state.drum_track_sound); fmt.printf("--- Miniaudio drum_track_sound uninitialized ---\n")
+    ma.sound_uninit(&shared.state.synth_track_sound); fmt.printf("--- Miniaudio synth_track_sound uninitialized ---\n")
+
+    ma.engine_uninit(&shared.state.audio_engine); fmt.printf("--- Miniaudio engine uninitialized ---\n")
 }
