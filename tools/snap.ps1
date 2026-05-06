@@ -5,7 +5,11 @@ param(
     [string]$Exe = "$PSScriptRoot/../geowars_windows.exe",
     [string]$Out = "$PSScriptRoot/../screenshots/snap.png",
     [int]$WaitSeconds = 3,
-    [string]$WindowTitle = "GeoWars"
+    [string]$WindowTitle = "GeoWars",
+    # Hold this character (W/A/S/D, or empty) for HoldSeconds before snapping.
+    # Used to drive the player toward the arena boundary for bounce verification.
+    [string]$HoldKey = "",
+    [double]$HoldSeconds = 0.0
 )
 
 Add-Type -AssemblyName System.Drawing
@@ -28,6 +32,37 @@ public static class Snap {
     [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
     [DllImport("user32.dll")] public static extern bool ClientToScreen(IntPtr hWnd, ref POINT lpPoint);
+    [DllImport("user32.dll")] public static extern short VkKeyScan(char ch);
+    [DllImport("user32.dll", SetLastError = true)] public static extern uint SendInput(uint nInputs, INPUT[] pInputs, int cbSize);
+
+    [StructLayout(LayoutKind.Sequential)] public struct KEYBDINPUT { public ushort wVk; public ushort wScan; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] public struct MOUSEINPUT { public int dx; public int dy; public uint mouseData; public uint dwFlags; public uint time; public IntPtr dwExtraInfo; }
+    [StructLayout(LayoutKind.Sequential)] public struct HARDWAREINPUT { public uint uMsg; public ushort wParamL; public ushort wParamH; }
+    [StructLayout(LayoutKind.Explicit)] public struct INPUTUNION { [FieldOffset(0)] public MOUSEINPUT mi; [FieldOffset(0)] public KEYBDINPUT ki; [FieldOffset(0)] public HARDWAREINPUT hi; }
+    [StructLayout(LayoutKind.Sequential)] public struct INPUT { public uint type; public INPUTUNION u; }
+
+    public const uint INPUT_KEYBOARD = 1;
+    public const uint KEYEVENTF_KEYUP = 0x0002;
+
+    public static void HoldKey(IntPtr hwnd, char keyChar, double seconds) {
+        short vk = VkKeyScan(keyChar);
+        ushort vkCode = (ushort)(vk & 0xFF);
+
+        // Send KEYDOWN once. SendInput injects into the foreground window's input queue
+        // — caller must ensure the game window is foreground.
+        var down = new INPUT { type = INPUT_KEYBOARD };
+        down.u.ki = new KEYBDINPUT { wVk = vkCode };
+        SendInput(1, new INPUT[] { down }, Marshal.SizeOf(typeof(INPUT)));
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed.TotalSeconds < seconds) {
+            System.Threading.Thread.Sleep(20);
+        }
+
+        var up = new INPUT { type = INPUT_KEYBOARD };
+        up.u.ki = new KEYBDINPUT { wVk = vkCode, dwFlags = KEYEVENTF_KEYUP };
+        SendInput(1, new INPUT[] { up }, Marshal.SizeOf(typeof(INPUT)));
+    }
 
     [StructLayout(LayoutKind.Sequential)] public struct RECT { public int Left, Top, Right, Bottom; }
     [StructLayout(LayoutKind.Sequential)] public struct POINT { public int X, Y; }
@@ -109,6 +144,13 @@ if ($hwnd -eq [IntPtr]::Zero) {
 [void][Snap]::ShowWindow($hwnd, 9)        # SW_RESTORE
 [void][Snap]::SetForegroundWindow($hwnd)
 Start-Sleep -Milliseconds 250
+
+# Optionally hold a key (W/A/S/D) to drive the player toward the arena edge.
+if ($HoldKey -ne "" -and $HoldSeconds -gt 0.0) {
+    Write-Host "Holding key '$HoldKey' for $HoldSeconds seconds..."
+    [Snap]::HoldKey($hwnd, [char]$HoldKey.ToUpper()[0], $HoldSeconds)
+    Start-Sleep -Milliseconds 100
+}
 
 # Try PrintWindow first (hardware-accelerated capture).
 $bmp = [Snap]::CaptureWindowPrint($hwnd)
