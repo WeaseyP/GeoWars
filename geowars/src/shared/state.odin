@@ -9,7 +9,7 @@ import m "../vendor/math"
 state: struct {
     progression: GameProgression,
     pass_action: sg.Pass_Action, bind: sg.Bindings,
-    bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline, arena_pip: sg.Pipeline,
+    bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline,
     bg_fs_params: Bg_Fs_Params, player_vs_params: Player_Vs_Params, player_fs_params: Player_Fs_Params,
     particle_vs_params: Particle_Vs_Params, particle_fs_params: Particle_Fs_Params,
     enemy_vs_params: Enemy_Vs_Params, enemy_fs_params: Enemy_Fs_Params,
@@ -59,7 +59,4 @@ state: struct {
     next_enemy_index: int, num_active_enemies: int,
     grunt_spawn_timer: f32,
     slowboy_spawn_timer: f32,
-
-    screenshot_timer: f32,
-    screenshot_index: int,
 }

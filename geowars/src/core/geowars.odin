@@ -185,10 +185,8 @@ frame :: proc "c" () {
 
 
     sg.begin_pass({action=shared.state.pass_action, swapchain=sglue.swapchain() })
+    // Background pass also renders the arena ring + outside-arena darkening (see fs_bg in shader.glsl).
     sg.apply_pipeline(shared.state.bg_pip); sg.apply_bindings(shared.state.bind); sg.apply_uniforms(shared.UB_bg_fs_params, sg.Range{ptr=&shared.state.bg_fs_params, size=size_of(shared.Bg_Fs_Params)}); sg.draw(0,4,1)
-
-    // Arena ring: drawn after the bg, before gameplay sprites. Uses player pipeline shader is wrong — we'll use a thin stripe rendered in the bg shader by drawing it after with a scissor-style approach later. For now, render the arena as a series of small particles via the particle pipeline as a stand-in.
-    // (Visible arena boundary will be improved in a dedicated shader pass once baseline render is verified.)
 
     sg.apply_pipeline(shared.state.player_pip); sg.apply_bindings(shared.state.bind); sg.apply_uniforms(shared.UB_Player_Vs_Params, sg.Range{ptr=&shared.state.player_vs_params, size=size_of(shared.Player_Vs_Params)}); sg.apply_uniforms(shared.UB_Player_Fs_Params, sg.Range{ptr=&shared.state.player_fs_params, size=size_of(shared.Player_Fs_Params)}); sg.draw(0,4,1)
 
