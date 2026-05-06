@@ -78,9 +78,9 @@ init :: proc "c" () {
     }
     shared.game_levels[0].stages[0].enemy_configs[0] = shared.EnemySpawnConfig {
         enemy_type = .GRUNT,
-        count = 1,
+        count = 5,
         min_spawn_delay = 0.5,
-        max_spawn_delay = 0.8,
+        max_spawn_delay = 1.2,
     }
 
     shared.game_levels[0].stages[1] = shared.StageDefinition{
