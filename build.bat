@@ -1,6 +1,7 @@
 @echo off
 echo Building Shaders...
-sokol-shdc -i geowars/assets/shaders/shader.glsl -o geowars/src/shared/shader.odin -l hlsl5:wgsl -f sokol_odin
+REM Use the local sokol-shdc.exe in the project root (matches how the repo ships it).
+"%~dp0sokol-shdc.exe" -i geowars/assets/shaders/shader.glsl -o geowars/src/shared/shader.odin -l hlsl5:wgsl -f sokol_odin
 if errorlevel 1 goto :error
 
 REM Patch the auto-generated shader.odin so it lives in the `shared` package.
