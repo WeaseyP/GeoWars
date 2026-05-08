@@ -19,6 +19,7 @@ layout(binding=0) uniform bg_fs_params {
     float tick;
     vec2 resolution;
     int bg_option;
+    float player_hp_ratio;   // 1.0 = full HP, 0.0 = dead. Drives arena-ring colour shift.
 };
 out vec4 frag_color;
 
@@ -104,8 +105,13 @@ void main() { // fs_bg main
         float outside_factor = smoothstep(ARENA_R, ARENA_R + 0.15, dist_from_center);
         final_color *= mix(1.0, 0.55, outside_factor);
 
-        // Ring colour: cyan-ish glow that pulses gently with time.
-        vec3 ring_color = vec3(0.55, 0.85, 1.0) * (0.85 + 0.15 * sin(time * 1.5));
+        // Ring colour: cyan when healthy, ramps to red as HP drops; pulse rate also speeds up at low HP.
+        float danger = clamp(1.0 - player_hp_ratio, 0.0, 1.0);
+        float pulse_rate = mix(1.5, 6.0, danger);
+        vec3 healthy_ring = vec3(0.55, 0.85, 1.0);
+        vec3 danger_ring  = vec3(1.0, 0.25, 0.30);
+        vec3 ring_base = mix(healthy_ring, danger_ring, danger);
+        vec3 ring_color = ring_base * (0.85 + 0.15 * sin(time * pulse_rate));
         final_color = mix(final_color, ring_color, ring_alpha * 0.95);
 
         frag_color = vec4(clamp(final_color, 0.0, 1.0), 1.0);

@@ -160,7 +160,11 @@ frame :: proc "c" () {
 
     progression.update_progression()
 
-    shared.state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1}
+    hp_ratio: f32 = 0.0
+    if shared.state.player_max_hp > 0 {
+        hp_ratio = f32(shared.state.player_hp) / f32(shared.state.player_max_hp)
+    }
+    shared.state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1, player_hp_ratio=hp_ratio}
     shared.state.player_fs_params={
         tick=current_time_f, resolution={width_f,height_f}, player_hp_uniform=f32(shared.state.player_hp),
         player_max_hp_uniform=f32(shared.state.player_max_hp), player_invulnerable_timer_uniform = shared.state.player_invulnerable_timer,
