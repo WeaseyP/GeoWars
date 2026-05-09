@@ -20,6 +20,7 @@ layout(binding=0) uniform bg_fs_params {
     vec2 resolution;
     int bg_option;
     float player_hp_ratio;   // 1.0 = full HP, 0.0 = dead. Drives arena-ring colour shift.
+    vec2 camera_pos;         // World position the camera is centred on (player_pos for follow camera).
 };
 out vec4 frag_color;
 
@@ -48,7 +49,15 @@ void main() { // fs_bg main
         vec2 xy = fract((gl_FragCoord.xy-vec2(tick)) / 50.0);
         frag_color = vec4(vec3(xy.x*xy.y), 1.0);
     } else {
+        // Background: screen-anchored nebula + stars (do NOT move with the camera, so they read
+        // as a separate visual layer from the world-space enemies). Only the arena ring lives in
+        // world space, computed via world_uv below.
+        const float ORTHO_H = 1.5;
+        vec2 ndc_pre = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
+        vec2 cam_local_pre = vec2(ndc_pre.x * (resolution.x / resolution.y) * ORTHO_H, ndc_pre.y * ORTHO_H);
+        vec2 world_uv = camera_pos + cam_local_pre;
         vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
+
         float time = tick;
         vec2 nebula_p = uv_aspect * 0.8 + vec2(time * 0.008, time * 0.003);
         float noise_val = fbm(nebula_p, 5, 0.5, 2.1);
@@ -87,15 +96,10 @@ void main() { // fs_bg main
         vec3 final_color = fnc * 0.9 + star_light * star_mask;
 
         // --- Arena Ring overlay ---
-        // Convert pixel coords to world coords (matches Odin ORTHO_HEIGHT = 1.5).
-        // World y range: -1.5 .. +1.5 (vertical), x scales by aspect ratio.
-        // gl_FragCoord origin is bottom-left in GL but top-left in HLSL — sokol-shdc's GLSL stays GL-style.
-        const float ORTHO_H = 1.5;
-        const float ARENA_R = ORTHO_H * 1.4;        // matches shared.ARENA_RADIUS
-        const float RING_HALF_W = 0.018;            // half-thickness of the visible ring
-        vec2 ndc = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
-        vec2 world_pos = vec2(ndc.x * (resolution.x / resolution.y) * ORTHO_H, ndc.y * ORTHO_H);
-        float dist_from_center = length(world_pos);
+        // world_uv was already computed at the top of this branch.
+        const float ARENA_R = ORTHO_H * 1.5;        // matches shared.ARENA_RADIUS
+        const float RING_HALF_W = 0.022;            // half-thickness of the visible ring
+        float dist_from_center = length(world_uv);
 
         // Anti-aliased ring: peak intensity at ARENA_R, falls off over RING_HALF_W on each side.
         float ring_d = abs(dist_from_center - ARENA_R);
