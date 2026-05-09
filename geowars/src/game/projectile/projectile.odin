@@ -23,8 +23,10 @@ get_mouse_world_pos :: proc() -> m.vec2 {
     ndc_y_mouse := 1.0 - (2.0 * shared.state.mouse_screen_pos.y / screen_height_mouse)
     aspect_ratio_mouse := screen_width_mouse / screen_height_mouse
     ortho_width_vp_mouse := shared.ORTHO_HEIGHT * aspect_ratio_mouse
-    world_x_mouse := ndc_x_mouse * ortho_width_vp_mouse
-    world_y_mouse := ndc_y_mouse * shared.ORTHO_HEIGHT
+    // Mouse position in camera-local space, then offset by the camera's world position
+    // so the result is the actual world coordinate the mouse is hovering over.
+    world_x_mouse := ndc_x_mouse * ortho_width_vp_mouse + shared.state.camera_pos.x
+    world_y_mouse := ndc_y_mouse * shared.ORTHO_HEIGHT  + shared.state.camera_pos.y
     return {world_x_mouse, world_y_mouse}
 }
 
