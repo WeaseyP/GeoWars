@@ -97,7 +97,7 @@ void main() { // fs_bg main
 
         // --- Arena Ring overlay ---
         // world_uv was already computed at the top of this branch.
-        const float ARENA_R = ORTHO_H * 1.5;        // matches shared.ARENA_RADIUS
+        const float ARENA_R = ORTHO_H * 1.0;        // matches shared.ARENA_RADIUS
         const float RING_HALF_W = 0.022;            // half-thickness of the visible ring
         float dist_from_center = length(world_uv);
 

@@ -164,7 +164,9 @@ frame :: proc "c" () {
     if shared.state.player_max_hp > 0 {
         hp_ratio = f32(shared.state.player_hp) / f32(shared.state.player_max_hp)
     }
-    shared.state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1, player_hp_ratio=hp_ratio, camera_pos=shared.state.player_pos}
+    // Camera is fixed at world origin; the camera_pos uniform stays at 0 so the arena
+    // ring renders centred on screen. Player moves around within the visible arena.
+    shared.state.bg_fs_params={tick=current_time_f, resolution={width_f,height_f}, bg_option=1, player_hp_ratio=hp_ratio, camera_pos={0,0}}
     shared.state.player_fs_params={
         tick=current_time_f, resolution={width_f,height_f}, player_hp_uniform=f32(shared.state.player_hp),
         player_max_hp_uniform=f32(shared.state.player_max_hp), player_invulnerable_timer_uniform = shared.state.player_invulnerable_timer,
@@ -176,8 +178,8 @@ frame :: proc "c" () {
 
     ortho_width_vp_f := shared.ORTHO_HEIGHT*aspect_f
     proj_f := m.ortho(-ortho_width_vp_f,ortho_width_vp_f,-shared.ORTHO_HEIGHT,shared.ORTHO_HEIGHT,-1.0,1.0)
-    // Follow camera: translate the world by -player_pos so the player stays at screen centre.
-    view_f := m.translate(m.vec3{-shared.state.player_pos.x, -shared.state.player_pos.y, 0.0})
+    // Fixed camera at world origin. Player moves within the visible arena.
+    view_f := m.identity()
     view_proj_f := m.mul(proj_f,view_f)
 
     scale_mat_f := m.scale(m.vec3{shared.PLAYER_SCALE,shared.PLAYER_SCALE,1.0})

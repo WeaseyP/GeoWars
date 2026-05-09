@@ -9,7 +9,7 @@ MAX_BLACKHOLES :: 64
 
 // --- Constants ---
 ORTHO_HEIGHT :: 1.5
-ARENA_RADIUS :: ORTHO_HEIGHT * 1.5    // 2.25. Smaller than the camera diagonal (~2.5) so the ring is always at least visible at the corners; player visible portion is roughly 75% of the arena at centre.
+ARENA_RADIUS :: ORTHO_HEIGHT * 1.0    // 1.5. Whole arena fits inside the camera vertically with a fixed camera; player and enemies are always on screen.
 ARENA_BOUNCE_DAMPING :: 0.6
 ARENA_RING_THICKNESS :: 0.025
 
