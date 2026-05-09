@@ -9,7 +9,7 @@ MAX_BLACKHOLES :: 64
 
 // --- Constants ---
 ORTHO_HEIGHT :: 1.5
-ARENA_RADIUS :: ORTHO_HEIGHT * 1.0    // 1.5. Whole arena fits inside the camera vertically with a fixed camera; player and enemies are always on screen.
+ARENA_RADIUS :: ORTHO_HEIGHT * 1.7    // 2.55. Bigger than the camera in both axes; deadzone-follow camera slides as the player pushes against the edge of the visible area.
 ARENA_BOUNCE_DAMPING :: 0.6
 ARENA_RING_THICKNESS :: 0.025
 

@@ -59,4 +59,8 @@ state: struct {
     next_enemy_index: int, num_active_enemies: int,
     grunt_spawn_timer: f32,
     slowboy_spawn_timer: f32,
+
+    // Deadzone-follow camera: camera_pos lags player_pos. Only moves when the player
+    // pushes past the deadzone rectangle around the current camera centre.
+    camera_pos: m.vec2,
 }

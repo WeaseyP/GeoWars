@@ -53,8 +53,11 @@ void main() { // fs_bg main
         // as a separate visual layer from the world-space enemies). Only the arena ring lives in
         // world space, computed via world_uv below.
         const float ORTHO_H = 1.5;
+        // sokol-shdc's HLSL output has the FS gl_FragCoord with y=0 at the TOP of the screen,
+        // which is the opposite of vertex-stage NDC. Flip y here so world_uv matches the same
+        // world-space coordinates the vertex shader uses for player/enemy positions.
         vec2 ndc_pre = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
-        vec2 cam_local_pre = vec2(ndc_pre.x * (resolution.x / resolution.y) * ORTHO_H, ndc_pre.y * ORTHO_H);
+        vec2 cam_local_pre = vec2(ndc_pre.x * (resolution.x / resolution.y) * ORTHO_H, -ndc_pre.y * ORTHO_H);
         vec2 world_uv = camera_pos + cam_local_pre;
         vec2 uv_aspect = gl_FragCoord.xy / resolution.y;
 
@@ -97,7 +100,7 @@ void main() { // fs_bg main
 
         // --- Arena Ring overlay ---
         // world_uv was already computed at the top of this branch.
-        const float ARENA_R = ORTHO_H * 1.0;        // matches shared.ARENA_RADIUS
+        const float ARENA_R = ORTHO_H * 1.7;        // matches shared.ARENA_RADIUS
         const float RING_HALF_W = 0.022;            // half-thickness of the visible ring
         float dist_from_center = length(world_uv);
 
