@@ -21,21 +21,21 @@ update_player :: proc(dt: f32) {
         if shared.state.key_shift_down && !shared.state.is_dashing && shared.state.dash_cooldown_timer <= 0.0 {
             shared.state.is_dashing = true
             shared.state.dash_timer = shared.PLAYER_DASH_DURATION
-            shared.state.dash_cooldown_timer = shared.PLAYER_DASH_COOLDOWN
+            shared.state.dash_cooldown_timer = shared.state.eff_dash_cooldown
             shared.state.player_invulnerable_timer = math.max(shared.state.player_invulnerable_timer, shared.PLAYER_DASH_DURATION)
             shared.state.player_dash_trail_count = 0
             shared.state.dash_trail_spawn_timer = 0.0
             fmt.printf("Player DASH!\n")
         }
 
-        if shared.state.current_rmb_ammo_charges < shared.MAX_RMB_AMMO_CHARGES {
-            shared.state.rmb_ammo_regen_timer -= dt
-            if shared.state.rmb_ammo_regen_timer <= 0.0 {
-                particle.spawn_visual_ammo_charge_particles(shared.state.current_rmb_ammo_charges)
-                shared.state.current_rmb_ammo_charges += 1
-                shared.state.rmb_ammo_regen_timer = shared.RMB_AMMO_REGEN_INTERVAL
-                fmt.printf("RMB Ammo Charge Regenerated! Current: %d/%d\n", shared.state.current_rmb_ammo_charges, shared.MAX_RMB_AMMO_CHARGES)
-            }
+        // RMB charge passively fills toward the soft cap (eff_rmb_max_charge, default 2.0).
+        // Player can fire at any fraction; droplet count scales with charge. >=100% also triggers
+        // a screen-pulse on release. Overcharge (>1.0) keeps stacking droplets.
+        if shared.state.rmb_charge < shared.state.eff_rmb_max_charge {
+            shared.state.rmb_charge = math.min(
+                shared.state.rmb_charge + shared.state.eff_rmb_charge_rate * dt,
+                shared.state.eff_rmb_max_charge,
+            )
         }
         accel_input_f := m.vec2_zero()
         if shared.state.key_w_down {accel_input_f.y+=1.0}; if shared.state.key_s_down {accel_input_f.y-=1.0}
@@ -64,15 +64,16 @@ update_player :: proc(dt: f32) {
             } else if m.len_sq_vec2(dash_direction) < 0.1 {
                 dash_direction = {0, 1}
             }
-            shared.state.player_vel = dash_direction * shared.PLAYER_MAX_SPEED * shared.PLAYER_DASH_SPEED_MULT
+            shared.state.player_vel = dash_direction * shared.state.eff_player_max_speed * shared.PLAYER_DASH_SPEED_MULT
         } else {
             final_accel_f := accel_input_f * shared.PLAYER_ACCELERATION
             if shared.state.key_s_down && !shared.state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= shared.PLAYER_REVERSE_FACTOR }
             shared.state.player_vel += final_accel_f * dt
             damping_factor_f := math.max(0.0, 1.0 - shared.PLAYER_DAMPING*dt)
             shared.state.player_vel *= damping_factor_f
-            if m.len_sq_vec2(shared.state.player_vel) > f32(shared.PLAYER_MAX_SPEED * shared.PLAYER_MAX_SPEED) {
-                shared.state.player_vel = m.norm_vec2(shared.state.player_vel) * shared.PLAYER_MAX_SPEED
+            max_speed := shared.state.eff_player_max_speed
+            if m.len_sq_vec2(shared.state.player_vel) > max_speed * max_speed {
+                shared.state.player_vel = m.norm_vec2(shared.state.player_vel) * max_speed
             }
         }
 
@@ -80,28 +81,28 @@ update_player :: proc(dt: f32) {
         shared.state.player_pos += shared.state.player_vel * dt
 
         rmb_pressed_this_frame_f := shared.state.rmb_down && !shared.state.previous_rmb_down
-        if rmb_pressed_this_frame_f && shared.state.current_rmb_ammo_charges > 0 {
-            particle.remove_visual_ammo_charge_particles(shared.state.current_rmb_ammo_charges - 1)
-        }
-        if rmb_pressed_this_frame_f && shared.state.rmb_cooldown_timer <= 0.0 {
-            if shared.state.current_rmb_ammo_charges > 0 {
-                shared.state.current_rmb_ammo_charges -= 1
-                particle.spawn_swirling_charge()
-                fmt.printf("RMB Fired! Ammo Remaining: %d/%d\n", shared.state.current_rmb_ammo_charges, shared.MAX_RMB_AMMO_CHARGES)
-                if shared.BLACKHOLE_COOLDOWN_DURATION > 0.0 { shared.state.rmb_cooldown_timer = shared.BLACKHOLE_COOLDOWN_DURATION }
-            } else {
-                fmt.printf("RMB - NO AMMO! (Charges: %d/%d)\n", shared.state.current_rmb_ammo_charges, shared.MAX_RMB_AMMO_CHARGES)
+        if rmb_pressed_this_frame_f && shared.state.rmb_charge >= shared.RMB_MIN_FIRE_CHARGE {
+            charge := shared.state.rmb_charge
+            // Droplet swirl scaled to charge fraction. At 200% you get 2× the droplets.
+            particle.spawn_swirling_charge_scaled(charge)
+            // Beam/pulse only at fully-charged or overcharged release.
+            if charge >= shared.RMB_BEAM_THRESHOLD {
+                particle.spawn_rmb_pulse(charge)
             }
+            shared.state.rmb_fire_flash = 1.0
+            fmt.printf("RMB Fired at %.0f%% charge%s\n", charge * 100.0, charge >= shared.RMB_BEAM_THRESHOLD ? " (PULSE)" : "")
+            shared.state.rmb_charge = 0.0
         }
         shared.state.previous_rmb_down = shared.state.rmb_down
 
         if shared.state.lmb_down && shared.state.lmb_cooldown_timer <= 0.0 {
             projectile.spawn_blackhole_projectile_weapon()
+            shared.state.lmb_fire_flash = 1.0
             seek_result_f := ma.sound_seek_to_pcm_frame(&shared.state.lmb_sound, 0)
             if seek_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to seek lmb_sound to beginning. Error: %v\n", seek_result_f) }
             start_result_f := ma.sound_start(&shared.state.lmb_sound)
             if start_result_f != .SUCCESS { fmt.eprintf("WARNING: Failed to start lmb_sound. Error: %v\n", start_result_f) }
-            shared.state.lmb_cooldown_timer = shared.PROJECTILE_BLACKHOLE_COOLDOWN
+            shared.state.lmb_cooldown_timer = shared.state.eff_lmb_cooldown
         }
         shared.state.previous_lmb_down = shared.state.lmb_down
     } else {
@@ -120,7 +121,12 @@ handle_player_input :: proc(event: ^sapp.Event) {
         case .S: shared.state.key_s_down = true
         case .A: shared.state.key_a_down = true
         case .D: shared.state.key_d_down = true
+        case .F: shared.state.key_f_down = true
+        case ._1: if shared.state.game_mode == .SHOP { shared.state.shop_pick_1 = true }
+        case ._2: if shared.state.game_mode == .SHOP { shared.state.shop_pick_2 = true }
+        case ._3: if shared.state.game_mode == .SHOP { shared.state.shop_pick_3 = true }
         case .LEFT_SHIFT: shared.state.key_shift_down = true
+        case .LEFT_CONTROL: shared.state.key_ctrl_down = true
         case .ESCAPE: sapp.request_quit()
     }
     case .KEY_UP: #partial switch event.key_code {
@@ -128,7 +134,9 @@ handle_player_input :: proc(event: ^sapp.Event) {
         case .S: shared.state.key_s_down = false
         case .A: shared.state.key_a_down = false
         case .D: shared.state.key_d_down = false
+        case .F: shared.state.key_f_down = false
         case .LEFT_SHIFT: shared.state.key_shift_down = false
+        case .LEFT_CONTROL: shared.state.key_ctrl_down = false
     }
     case .MOUSE_DOWN:
         if event.mouse_button == .RIGHT { shared.state.rmb_down = true }
@@ -148,59 +156,52 @@ check_player_boss_laser_collision :: proc() {
     player_center := shared.state.player_pos
     player_radius : f32 = shared.PLAYER_CORE_WORLD_RADIUS
 
+    half_width := shared.BOSS_LASER_WIDTH * 0.5 + player_radius
+    cap_sq := half_width * half_width
+
     for i in 0..<shared.MAX_ENEMIES {
         enemy_laser_coll := &shared.state.enemies[i]
         if !enemy_laser_coll.active || enemy_laser_coll.type != .BOSS_CHROME_ORB || enemy_laser_coll.is_dying || enemy_laser_coll.is_growing {
             continue
         }
 
-        shader_uv_sphere_radius          : f32 = 0.45
-        shader_black_circle_orbit_factor : f32 = 0.6
+        laser_length := enemy_laser_coll.boss_current_laser_length
+        if laser_length <= 0.0 { continue }
+        laser_count := enemy_laser_coll.boss_laser_count
+        if laser_count <= 0 { continue }
 
-        world_radius_of_main_sphere_visual := enemy_laser_coll.current_size * shader_uv_sphere_radius
-        world_orbit_radius_for_black_circle := world_radius_of_main_sphere_visual * shader_black_circle_orbit_factor
+        // Each beam shares the orb's pivot, but its angular slot comes from the random permutation
+        // computed at boss spawn. Slot s lives at angle (rotation + s * TAU/6).
+        for k in 0..<laser_count {
+            // Skip damage during the first half of fade-in (visual warning before the beam can hit).
+            if k == laser_count - 1 && enemy_laser_coll.boss_laser_fade_in_timer > 0.5 { continue }
 
-        boss_facing_direction := m.norm_vec2(m.vec2{math.cos(enemy_laser_coll.rotation), math.sin(enemy_laser_coll.rotation)})
-        black_circle_world_center := enemy_laser_coll.pos + boss_facing_direction * world_orbit_radius_for_black_circle
+            slot := enemy_laser_coll.boss_laser_slot_order[k]
+            beam_angle := enemy_laser_coll.rotation + f32(slot) * (m.TAU / 6.0)
+            laser_direction_vec := m.vec2{math.cos(beam_angle), math.sin(beam_angle)}
+            laser_origin_world := enemy_laser_coll.pos + laser_direction_vec * shared.ENEMY_BOSS_VISUAL_RADIUS
 
-        laser_origin_world := black_circle_world_center
-        laser_direction_vec := boss_facing_direction
+            rel := player_center - laser_origin_world
+            local_y := m.dot_vec2(rel, laser_direction_vec)
+            perp := m.vec2{-laser_direction_vec.y, laser_direction_vec.x}
+            local_x := m.dot_vec2(rel, perp)
 
-        vec_to_player_from_origin := player_center - laser_origin_world
+            hit := false
+            if local_y >= 0.0 && local_y <= laser_length && math.abs(local_x) <= half_width {
+                hit = true
+            } else if m.dist_sq_vec2(player_center, laser_origin_world) < cap_sq {
+                hit = true
+            } else {
+                end_world := laser_origin_world + laser_direction_vec * laser_length
+                if m.dist_sq_vec2(player_center, end_world) < cap_sq { hit = true }
+            }
 
-        player_local_y := m.dot_vec2(vec_to_player_from_origin, laser_direction_vec)
-        laser_perpendicular_vec := m.vec2{-laser_direction_vec.y, laser_direction_vec.x}
-        player_local_x := m.dot_vec2(vec_to_player_from_origin, laser_perpendicular_vec)
-
-        if player_local_y >= -player_radius && player_local_y <= (shared.BOSS_LASER_LENGTH + player_radius) &&
-           math.abs(player_local_x) <= (shared.BOSS_LASER_WIDTH / 2.0 + player_radius) {
-
-            if player_local_y > 0 && player_local_y < shared.BOSS_LASER_LENGTH &&
-               math.abs(player_local_x) < (shared.BOSS_LASER_WIDTH / 2.0 + player_radius) {
+            if hit {
                 shared.state.player_hp -= shared.BOSS_LASER_DAMAGE
                 shared.state.player_hp = math.max(shared.state.player_hp, 0)
-                shared.state.player_invulnerable_timer = shared.PLAYER_INVULNERABILITY_DURATION / 2.0
-                fmt.printf("Player hit by BOSS LASER (Body)! HP: %d/%d. Invulnerable for %.2fs\n", shared.state.player_hp, shared.state.player_max_hp, shared.state.player_invulnerable_timer)
+                shared.state.player_invulnerable_timer = shared.state.eff_invul_duration / 2.0
+                fmt.printf("Player hit by BOSS LASER (beam %d/%d, slot %d)! HP: %d/%d.\n", k+1, laser_count, slot, shared.state.player_hp, shared.state.player_max_hp)
                 return
-            } else {
-                cap_radius_for_check_sq := (shared.BOSS_LASER_WIDTH / 2.0 + player_radius) * (shared.BOSS_LASER_WIDTH / 2.0 + player_radius)
-
-                if m.dist_sq_vec2(player_center, laser_origin_world) < cap_radius_for_check_sq {
-                    shared.state.player_hp -= shared.BOSS_LASER_DAMAGE
-                    shared.state.player_hp = math.max(shared.state.player_hp, 0)
-                    shared.state.player_invulnerable_timer = shared.PLAYER_INVULNERABILITY_DURATION / 2.0
-                    fmt.printf("Player hit by BOSS LASER (Origin Cap)! HP: %d/%d. Invulnerable for %.2fs\n", shared.state.player_hp, shared.state.player_max_hp, shared.state.player_invulnerable_timer)
-                    return
-                }
-
-                laser_end_world := laser_origin_world + laser_direction_vec * shared.BOSS_LASER_LENGTH
-                if m.dist_sq_vec2(player_center, laser_end_world) < cap_radius_for_check_sq {
-                    shared.state.player_hp -= shared.BOSS_LASER_DAMAGE
-                    shared.state.player_hp = math.max(shared.state.player_hp, 0)
-                    shared.state.player_invulnerable_timer = shared.PLAYER_INVULNERABILITY_DURATION / 2.0
-                    fmt.printf("Player hit by BOSS LASER (End Cap)! HP: %d/%d. Invulnerable for %.2fs\n", shared.state.player_hp, shared.state.player_max_hp, shared.state.player_invulnerable_timer)
-                    return
-                }
             }
         }
     }
@@ -222,21 +223,26 @@ check_player_enemy_collisions :: proc() {
         if dist_sq_pe_coll < radii_sum_sq_pe_coll {
             if enemy_pe_coll.hp <= 0 { continue }
 
-            damage_to_player := shared.ENEMY_GRUNT_DAMAGE_VALUE
-            if enemy_pe_coll.type == .SLOWBOY && enemy_pe_coll.is_charging_attack {
-                damage_to_player = shared.SLOWBOY_ATTACK_DAMAGE
+            base_dmg := shared.ENEMY_GRUNT_DAMAGE_VALUE
+            if enemy_pe_coll.type == .SLOWBOY && shared.SlowboyState(enemy_pe_coll.ai_state) == .CHARGE {
+                base_dmg = shared.SLOWBOY_ATTACK_DAMAGE
                 fmt.printf("Player hit by SLOWBOY CHARGE!\n")
-                enemy_pe_coll.is_charging_attack = false
-                enemy_pe_coll.vel = {0,0}
+                enemy_pe_coll.vel = {0, 0}
+                // End the charge early — counts as recover so it doesn't keep tracking through the player.
+                enemy_pe_coll.ai_state = i32(shared.SlowboyState.RECOVER)
+                enemy_pe_coll.ai_state_timer = shared.SLOWBOY_RECOVER_DURATION
+                enemy_pe_coll.ai_state_total = shared.SLOWBOY_RECOVER_DURATION
             } else if enemy_pe_coll.type == .BOSS_CHROME_ORB {
                 fmt.printf("Player hit by BOSS BODY!\n")
             }
 
-
-            shared.state.player_hp -= damage_to_player
+            // Elite scaling: silver/gold deal more damage on contact.
+            scaled := int(math.round(f32(base_dmg) * enemy_pe_coll.dmg_mult))
+            if scaled < 1 { scaled = 1 }
+            shared.state.player_hp -= scaled
             shared.state.player_hp = math.max(shared.state.player_hp, 0)
-            shared.state.player_invulnerable_timer = shared.PLAYER_INVULNERABILITY_DURATION
-            fmt.printf("Player hit by ENEMY! HP: %d/%d. Invulnerable for %.2fs\n", shared.state.player_hp, shared.state.player_max_hp, shared.state.player_invulnerable_timer)
+            shared.state.player_invulnerable_timer = shared.state.eff_invul_duration
+            fmt.printf("Player hit by %v (tier %d, dmg %d)! HP: %d/%d. Invul %.2fs\n", enemy_pe_coll.type, enemy_pe_coll.enemy_tier, scaled, shared.state.player_hp, shared.state.player_max_hp, shared.state.player_invulnerable_timer)
             break
         }
     }

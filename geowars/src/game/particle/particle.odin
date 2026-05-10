@@ -17,7 +17,7 @@ emit_particle :: proc(part: shared.Particle) {
     p_to_init_sound^ = part
     p_to_init_sound.has_active_sound = false
 
-    if p_to_init_sound.is_ammo_indicator || p_to_init_sound.is_swirling_charge {
+    if p_to_init_sound.is_swirling_charge {
         p_to_init_sound.has_active_sound = true
         sound_flags_particle: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }
         hum_init_res := ma.sound_init_from_data_source(&shared.state.audio_engine, (^ma.data_source)(&audio.rmb_hum_audio_buffer), sound_flags_particle, nil, &p_to_init_sound.sound_hum)
@@ -47,9 +47,16 @@ emit_particle :: proc(part: shared.Particle) {
     shared.state.next_particle_index = (shared.state.next_particle_index + 1) % shared.MAX_PARTICLES
 }
 
-spawn_swirling_charge :: proc() {
+// Spawn the RMB swirl with a particle count scaled to the player's current charge fraction.
+// charge_fraction == 1.0 emits the full DEATH_BURST_PARTICLE_COUNT; 0.5 emits half; 2.0 doubles
+// it (overcharge). Caller is responsible for clamping to a sane range.
+spawn_swirling_charge_scaled :: proc(charge_fraction: f32) {
     context = runtime.default_context()
     if shared.state.player_hp <= 0 { return }
+    if charge_fraction <= 0.001 { return }
+    count := int(math.round(f32(shared.DEATH_BURST_PARTICLE_COUNT) * charge_fraction))
+    if count < 1 { count = 1 }
+
     charge_spawn_center := shared.state.player_pos
     charge_duration := shared.SWIRL_CHARGE_DURATION_BASE + rand.float32() * shared.SWIRL_CHARGE_DURATION_RAND
     start_size_val_base := shared.SWIRL_PARTICLE_SIZE_BASE
@@ -61,7 +68,7 @@ spawn_swirling_charge :: proc() {
     if m.len_sq_vec2(shared.state.player_vel) > 0.001 { player_front_dir = m.norm_vec2(shared.state.player_vel) }
     cloud_travel_vel = player_front_dir * shared.SWIRL_CLOUD_BASE_PUSH
     if player_speed_sq > 0.001 && shared.SWIRL_CLOUD_TRAVEL_FACTOR > 0.0 { cloud_travel_vel += shared.state.player_vel * shared.SWIRL_CLOUD_TRAVEL_FACTOR }
-    for _ in 0..<shared.DEATH_BURST_PARTICLE_COUNT {
+    for _ in 0..<count {
         start_size_val := start_size_val_base + rand.float32() * start_size_val_rand
         spawn_angle := rand.float32() * f32(m.TAU)
         spawn_dist := rand.float32() * shared.SWIRL_RADIUS_SPAWN
@@ -79,7 +86,31 @@ spawn_swirling_charge :: proc() {
             pos=start_pos, vel=start_vel, cloud_travel_vel=cloud_travel_vel, color=start_color,
             size=start_size_val, start_size=start_size_val, life_remaining=charge_duration, life_max=charge_duration,
             swirl_duration=charge_duration, rotation=rand.float32()*f32(m.TAU), angular_vel=start_angular_vel,
-            charge_center_pos=charge_spawn_center, is_burst_particle=false, is_swirling_charge=true, is_ammo_indicator=false, active=false,
+            charge_center_pos=charge_spawn_center, is_burst_particle=false, is_swirling_charge=true, active=false,
+        })
+    }
+}
+
+// Screen-wide pulse — spawned in addition to the swirl when RMB releases at >=100% charge.
+// Particles fly outward in a perfect ring, pass through the standard RMB collision check, and
+// fade. charge >1 stacks more particles and a slight radius boost.
+spawn_rmb_pulse :: proc(charge: f32) {
+    context = runtime.default_context()
+    if shared.state.player_hp <= 0 { return }
+    overcharge := math.max(charge - shared.RMB_BEAM_THRESHOLD, 0.0)
+    count := shared.RMB_PULSE_PARTICLE_COUNT + int(math.round(overcharge * f32(shared.RMB_PULSE_PARTICLE_COUNT) * 0.5))
+    speed := shared.RMB_PULSE_PARTICLE_SPEED * (1.0 + overcharge * 0.25)
+    life  := shared.RMB_PULSE_PARTICLE_LIFETIME
+    size  := shared.RMB_PULSE_PARTICLE_SIZE * (1.0 + overcharge * 0.20)
+    centre := shared.state.player_pos
+    for i in 0..<count {
+        angle := (f32(i) / f32(count)) * m.TAU
+        dir := m.angle_to_vec2(angle)
+        emit_particle(shared.Particle{
+            pos=centre, vel=dir*speed, cloud_travel_vel={0,0}, color=shared.RMB_PULSE_PARTICLE_COLOR,
+            size=size, start_size=size, life_remaining=life, life_max=life, swirl_duration=0,
+            rotation=angle, angular_vel=0,
+            charge_center_pos={0,0}, is_burst_particle=false, is_swirling_charge=false, active=false,
         })
     }
 }
@@ -92,18 +123,7 @@ update_and_instance_particles :: proc(dt: f32) -> int {
         if !shared.state.particles[i].active { continue }
         p := &shared.state.particles[i]
 
-        if p.is_ammo_indicator {
-            p.rotation += shared.RMB_AMMO_INDICATOR_ORBIT_SPEED * dt
-            if p.rotation > m.TAU { p.rotation -= m.TAU }
-            else if p.rotation < 0 { p.rotation += m.TAU }
-            orbit_direction := m.angle_to_vec2(p.rotation)
-            p.pos = shared.state.player_pos + orbit_direction * shared.RMB_AMMO_INDICATOR_ORBIT_RADIUS
-            p.charge_center_pos.y += p.angular_vel * dt
-            if p.charge_center_pos.y > m.TAU {p.charge_center_pos.y -= m.TAU}
-            if p.charge_center_pos.y < 0 {p.charge_center_pos.y += m.TAU}
-            p.color = shared.RMB_AMMO_INDICATOR_COLOR
-            p.size = shared.RMB_AMMO_INDICATOR_BASE_SIZE
-        } else {
+        {
             p.pos += p.vel * dt
             screen_aspect_ratio_part: f32 = sapp.widthf() / sapp.heightf()
             world_half_width_part: f32 = shared.ORTHO_HEIGHT * screen_aspect_ratio_part
@@ -186,13 +206,39 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             inst := &shared.state.particle_instance_data[live_particle_count]
             inst.instance_pos=p.pos
             inst.instance_size=p.size
-            if p.is_ammo_indicator { inst.instance_rotation = p.charge_center_pos.y }
-            else { inst.instance_rotation = p.rotation }
+            inst.instance_rotation = p.rotation
             inst.instance_color=p.color
             live_particle_count += 1
         }
     }
     return live_particle_count
+}
+
+// Small bright burst on every LMB-projectile impact, kill or no kill — gives the shot a
+// visible "click" so the player reads the connection without waiting for a kill animation.
+spawn_LMB_hit_flash :: proc(pos: m.vec2, base_color: m.vec4) {
+    context = runtime.default_context()
+    for _ in 0..<shared.LMB_HIT_FLASH_COUNT {
+        angle := rand.float32() * m.TAU
+        dir := m.angle_to_vec2(angle)
+        speed := shared.LMB_HIT_FLASH_SPEED_BASE + rand.float32() * shared.LMB_HIT_FLASH_SPEED_RAND
+        life  := shared.LMB_HIT_FLASH_LIFETIME_BASE + rand.float32() * shared.LMB_HIT_FLASH_LIFETIME_RAND
+        size  := shared.LMB_HIT_FLASH_SIZE_BASE + rand.float32() * shared.LMB_HIT_FLASH_SIZE_RAND
+        // Mix the enemy's tint with the LMB purple so the flash feels like the bullet bursting,
+        // not a generic explosion.
+        color := m.vec4{
+            math.clamp(base_color.r * 0.4 + 0.7, 0.0, 1.0),
+            math.clamp(base_color.g * 0.4 + 0.4, 0.0, 1.0),
+            math.clamp(base_color.b * 0.4 + 0.9, 0.0, 1.0),
+            0.95,
+        }
+        emit_particle(shared.Particle{
+            pos=pos, vel=dir*speed, cloud_travel_vel={0,0}, color=color, size=size, start_size=size,
+            life_remaining=life, life_max=life, swirl_duration=0,
+            rotation=rand.float32()*m.TAU, angular_vel=0,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, active=false,
+        })
+    }
 }
 
 spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
@@ -212,48 +258,8 @@ spawn_LMB_enemy_death_particles :: proc(pos: m.vec2, base_color: m.vec4) {
         emit_particle(shared.Particle{
             pos=pos, vel=dir_lmb_d*speed_lmb_d, cloud_travel_vel={0,0}, color=particle_color_lmb_d, size=size_lmb_d, start_size=size_lmb_d,
             life_remaining=life_lmb_d, life_max=life_lmb_d, swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_lmb_d,
-            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, active=false,
         })
-    }
-}
-
-spawn_visual_ammo_charge_particles :: proc(charge_slot_index: int) {
-    context = runtime.default_context()
-    if charge_slot_index < 0 || charge_slot_index >= shared.MAX_RMB_AMMO_CHARGES { return }
-    base_orbit_angle_offset_va := (f32(charge_slot_index) / f32(shared.MAX_RMB_AMMO_CHARGES)) * m.TAU
-    for i in 0..<shared.RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE {
-        particle_angle_within_group_va := (f32(i) / f32(shared.RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE)) * m.TAU
-        current_orbit_angle_va := base_orbit_angle_offset_va + particle_angle_within_group_va + (shared.state.rmb_ammo_regen_timer * shared.RMB_AMMO_INDICATOR_ORBIT_SPEED)
-        emit_particle(shared.Particle{
-            pos = shared.state.player_pos, vel = {0,0}, cloud_travel_vel = {0,0}, color = shared.RMB_AMMO_INDICATOR_COLOR,
-            size = shared.RMB_AMMO_INDICATOR_BASE_SIZE, start_size = shared.RMB_AMMO_INDICATOR_BASE_SIZE,
-            life_remaining = 1.0, life_max = 1.0, swirl_duration = 0,
-            rotation = current_orbit_angle_va,
-            angular_vel = shared.RMB_AMMO_INDICATOR_SELF_SPIN_SPEED,
-            charge_center_pos= m.vec2{f32(charge_slot_index), rand.float32()*m.TAU},
-            is_burst_particle= false, is_swirling_charge= false, is_ammo_indicator= true, active = false,
-        })
-    }
-    fmt.printf("Spawned visual ammo for charge slot %d\n", charge_slot_index)
-}
-
-remove_visual_ammo_charge_particles :: proc(charge_slot_index_to_remove: int) {
-    context = runtime.default_context()
-    particles_removed_count := 0
-    for i in 0..<shared.MAX_PARTICLES {
-        p_va_rem := &shared.state.particles[i]
-        if p_va_rem.active && p_va_rem.is_ammo_indicator && int(p_va_rem.charge_center_pos.x) == charge_slot_index_to_remove {
-            if p_va_rem.has_active_sound {
-                ma.sound_uninit(&p_va_rem.sound_hum)
-                ma.sound_uninit(&p_va_rem.sound_whoosh)
-                p_va_rem.has_active_sound = false
-            }
-            p_va_rem.active = false
-            particles_removed_count += 1
-        }
-    }
-    if particles_removed_count > 0 {
-        fmt.printf("Removed %d visual ammo particles for charge slot %d\n", particles_removed_count, charge_slot_index_to_remove)
     }
 }
 
@@ -276,7 +282,7 @@ spawn_RMB_enemy_death_particles :: proc(pos: m.vec2) {
             pos=pos, vel=dir_rmb_d*speed_rmb_d, cloud_travel_vel={0,0}, color=particle_color_rmb_d, size=size_rmb_d, start_size=size_rmb_d,
             life_remaining=life_rmb_d, life_max=life_rmb_d,
             swirl_duration=0, rotation=rand.float32()*m.TAU, angular_vel=angular_vel_rmb_d,
-            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, is_ammo_indicator=false, active=false,
+            charge_center_pos={0,0}, is_burst_particle=true, is_swirling_charge=false, active=false,
         })
     }
 }

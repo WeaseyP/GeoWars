@@ -7,7 +7,21 @@ import m "../vendor/math"
 
 // Global state. Lives in `shared` so every package can reach it as `shared.state`.
 state: struct {
-    progression: GameProgression,
+    wave_system: WaveSystem,
+    game_mode:   GameMode,
+    shop:        ShopState,
+
+    // --- Effective stat mirrors. Constants are baselines; these are the live values that the
+    // shop's upgrades can modify. Initialised in core.init() to the constant defaults.
+    eff_lmb_damage:        i32,
+    eff_lmb_cooldown:      f32,
+    eff_rmb_max_charge:    f32, // soft cap on the charge meter (default 2.0 = 200%)
+    eff_rmb_charge_rate:   f32, // charge gained per second (default 0.10)
+    eff_rmb_damage_mult:   f32, // RMB_OVERCHARGE upgrade scales particle damage
+    eff_player_max_speed:  f32,
+    eff_dash_cooldown:     f32,
+    eff_invul_duration:    f32,
+
     pass_action: sg.Pass_Action, bind: sg.Bindings,
     bg_pip: sg.Pipeline, player_pip: sg.Pipeline, particle_pip: sg.Pipeline, enemy_pip: sg.Pipeline, blackhole_pip: sg.Pipeline,
     bg_fs_params: Bg_Fs_Params, player_vs_params: Player_Vs_Params, player_fs_params: Player_Fs_Params,
@@ -23,26 +37,44 @@ state: struct {
     rmb_kill_sound: ma.sound,
     drum_track_sound: ma.sound,
     synth_track_sound: ma.sound,
+    splitter_track_sound: ma.sound,
+    sniper_track_sound: ma.sound,
+    disruptor_track_sound: ma.sound,
+    boss_track_sound: ma.sound,
 
+    // Once any enemy of these types is killed, its track unlocks and keeps playing for the rest
+    // of the run (the music "builds" as new types get introduced). Disruptor is intentionally
+    // not on this list — its track is gated on live disruptors only.
     first_grunt_killed: bool,
     first_slowboy_killed: bool,
+    first_splitter_killed: bool,
+    first_sniper_killed: bool,
     player_pos: m.vec2, player_vel: m.vec2,
     player_hp: int, player_max_hp: int,
     player_invulnerable_timer: f32,
     player_defeated_message_shown: bool,
 
-    key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool, key_shift_down: bool,
+    key_w_down: bool, key_s_down: bool, key_a_down: bool, key_d_down: bool, key_shift_down: bool, key_ctrl_down: bool,
+    key_f_down: bool, key_f_was_down: bool,
+    // One-shot edge flags consumed by the shop on the frame after the corresponding key down.
+    shop_pick_1: bool, shop_pick_2: bool, shop_pick_3: bool,
+    // Counter of disruptor → button collisions still to be processed by the wave system.
+    // Each pending press drops a notch and activates the next wave (as if the player hit F).
+    disruptor_button_presses_pending: int,
+    player_aim_dir: m.vec2, // unit vector from player toward mouse cursor in world space
 
     rmb_down: bool, previous_rmb_down: bool, rmb_cooldown_timer: f32,
     lmb_down: bool, previous_lmb_down: bool, lmb_cooldown_timer: f32,
+    // Fire-flash timers (0..1). Set to 1 the frame an attack actually fires; decayed each frame
+    // and read by the player shader to draw a muzzle pulse / inward-suck animation.
+    lmb_fire_flash: f32, rmb_fire_flash: f32,
     is_dashing: bool, dash_timer: f32, dash_cooldown_timer: f32,
 
     player_dash_traiL_pos: [PLAYER_DASH_TRAIL_LENGTH]m.vec2,
     player_dash_trail_count: int,
     dash_trail_spawn_timer: f32,
 
-    current_rmb_ammo_charges: int,
-    rmb_ammo_regen_timer: f32,
+    rmb_charge: f32, // current charge meter [0..eff_rmb_max_charge]; consumed on RMB press
 
     mouse_screen_pos: m.vec2,
 
@@ -57,8 +89,6 @@ state: struct {
     enemies: [MAX_ENEMIES]Enemy, enemy_instance_data: [MAX_ENEMIES]Enemy_Instance_Data,
     enemy_instance_vbo: sg.Buffer, enemy_bind: sg.Bindings,
     next_enemy_index: int, num_active_enemies: int,
-    grunt_spawn_timer: f32,
-    slowboy_spawn_timer: f32,
 
     // Deadzone-follow camera: camera_pos lags player_pos. Only moves when the player
     // pushes past the deadzone rectangle around the current camera centre.

@@ -11,7 +11,45 @@ EnemyType :: enum {
     GRUNT,
     SLOWBOY,
     BOSS_CHROME_ORB,
+    SPLITTER,
+    SNIPER,
+    DISRUPTOR,
 }
+
+// Top-level game mode. Shop pauses everything except input + render.
+// TEST is a debug mode used by the screenshot harness — wave/progression is disabled,
+// the player can spawn enemies and reset the arena via debug keys.
+GameMode :: enum { PLAYING, SHOP, TEST }
+
+// Upgrade catalog. Each entry maps to a UpgradeDef in the shop module that knows how to apply
+// itself to the effective-value mirrors on shared.state.
+UpgradeID :: enum {
+    NONE,
+    MAX_HP_PLUS_1,
+    MAX_HP_PLUS_2_FULL_HEAL,
+    LMB_DAMAGE_PLUS_1,
+    LMB_DAMAGE_PLUS_2,
+    LMB_RAPID_FIRE,
+    RMB_EXTRA_CHARGE,
+    RMB_FAST_REGEN,
+    RMB_INSTANT_REFILL,
+    RMB_OVERCHARGE,
+    MAX_SPEED_PLUS,
+    FAST_DASH,
+    TOUGH_SKIN,
+}
+
+// Runtime state of an open shop. populated when game_mode flips to SHOP.
+ShopState :: struct {
+    options:     [3]UpgradeID,
+    hovered:     int,  // -1 = none, 0..2 = which card the mouse is over
+    is_pre_boss: bool, // last shop before the boss — better odds of higher-tier picks
+}
+
+// AI sub-state for type-specific state machines (slowboy, sniper). Each type interprets
+// the integer through its own enum-cast.
+SlowboyState :: enum i32 { APPROACH, WINDUP, CHARGE, RECOVER }
+SniperState  :: enum i32 { IDLE, AIMING, FIRING, COOLDOWN }
 
 Particle :: struct {
     pos:              m.vec2,
@@ -27,8 +65,7 @@ Particle :: struct {
     angular_vel:      f32,          
     charge_center_pos: m.vec2, 
     is_burst_particle: bool,
-    is_swirling_charge: bool, 
-    is_ammo_indicator: bool, 
+    is_swirling_charge: bool,
     active:           bool,
     sound_hum: ma.sound,
     sound_whoosh: ma.sound,
@@ -61,55 +98,58 @@ Blackhole_Instance_Data :: struct #align(16) {
     },
 }
 
-// --- Level and Stage System Structs ---
+// --- Wave System ---
+// A "wave" is one player-pressed batch of enemies. Each wave can have multiple spawn directives
+// (drip-feed grunts, single sniper at start, splitter mid-way, etc.). Player presses F at the
+// arena-centre button to enqueue the next wave; pressing 10x rapidly queues all 10 at once.
 
-EnemySpawnConfig :: struct {
-    enemy_type: EnemyType,
-    count: int,
-    min_spawn_delay: f32, // Minimum time in seconds before the next enemy of this type spawns
-    max_spawn_delay: f32, // Maximum time in seconds before the next enemy of this type spawns
+WaveSpawnDirective :: struct {
+    enemy_type:           EnemyType,
+    count:                int,
+    initial_delay:        f32, // seconds after wave activation before the first spawn
+    interval_min:         f32, // seconds between successive spawns of this directive
+    interval_max:         f32,
+    tier:                 int,  // 0 = normal, 1 = silver, 2 = gold (elite stats + visuals)
+    randomize_non_disruptor: bool, // if true, enemy_type is chosen at spawn time from {GRUNT, SLOWBOY, SPLITTER, SNIPER}
+    wait_for_arena_clear: bool, // directive is gated until no live (non-boss) enemy remains. Used to chain silver→gold.
 }
 
-StageDefinition :: struct {
-    enemy_configs: []EnemySpawnConfig, // Use a dynamic array for flexibility
-    // duration: f32, // Optional: could be used for time-based stages
-    // trigger_condition: string, // Optional: for more complex stage end conditions
+WaveDefinition :: struct {
+    directives: []WaveSpawnDirective,
+}
+
+// Runtime state for one directive inside an active wave.
+ActiveWaveDirective :: struct {
+    directive_index: int,
+    timer:           f32,  // counts down to the next spawn
+    remaining:       int,
+    waiting_initial: bool, // true while we're still respecting initial_delay
+    started:         bool, // false until any wait_for_arena_clear gate has been satisfied
+}
+
+ActiveWave :: struct {
+    wave_index:       int,
+    directive_states: [dynamic]ActiveWaveDirective,
+    all_spawned:      bool,
 }
 
 LevelDefinition :: struct {
-    stages: []StageDefinition, // Use a dynamic array
-    boss_config: EnemySpawnConfig, // A single config for the boss of this level
-    // Or boss_stage_index: int, if a boss is just a special stage
+    waves:       [10]WaveDefinition,
+    boss_config: WaveSpawnDirective,
 }
 
-// --- Structs for Tracking Active Stage Progress ---
+WaveSystem :: struct {
+    active_waves:         [dynamic]ActiveWave,
+    next_wave_to_press:   int, // 0..10 — index of the next wave that an F press will trigger
+    boss_triggered:       bool,
+    button_press_cooldown: f32, // small debounce so a key-repeat doesn't fire twice
 
-// State for a single enemy type within an active stage
-ActiveStageEnemySpawnState :: struct {
-    config_index: int,       // Index into the StageDefinition.enemy_configs
-    spawn_timer: f32,        // Current timer counting down to next spawn
-    spawned_count: int,      // How many of this enemy type have been spawned for this config
-    remaining_to_spawn: int, // How many are left to spawn for this config based on its count
-}
+    // Visual feedback
+    button_press_flash:   f32, // 0..1, briefly spikes to 1 on each press, decays
 
-// Holds all active enemy spawn states for the current stage
-ActiveStageState :: struct {
-    enemy_spawn_states: [dynamic]ActiveStageEnemySpawnState, // Dynamic array of states
-    all_enemies_for_stage_spawned: bool, // True if all enemies defined in enemy_configs have been spawned
-}
-
-GameProgression :: struct {
-    current_level_index: int,
-    current_stage_index: int,
-    
-    active_stage: ActiveStageState,
-    
-    total_enemies_defined_for_current_stage: int, // Total enemies from all configs in the current stage definition
-    enemies_defeated_in_current_stage: int,
-    
-    // Potentially, a pointer to the current LevelDefinition and StageDefinition
-    // current_level_def: ^LevelDefinition, // For easier access, manage lifetime carefully
-    // current_stage_def: ^StageDefinition, // For easier access, manage lifetime carefully
+    // Shop integration: how many shops have already been resolved (0..3). The next shop opens
+    // when next_wave_to_press >= (shops_offered+1)*3 AND the arena is empty.
+    shops_offered:        int,
 }
 
 Enemy :: struct {
@@ -131,16 +171,31 @@ Enemy :: struct {
     dying_timer: f32,
     death_rect_offset: f32,
     death_anim_max_duration: f32,
-    boss_move_direction: f32, // New field for boss horizontal movement
+    // --- Boss state ---
+    boss_move_direction: f32,        // +1 / -1 sign for orbital direction (CCW / CW)
+    boss_phase: int,                 // 1 = perimeter circle, 2 = centre orbit + sweeping laser + minions
+    boss_angle: f32,                 // current angle on the orbital path around arena centre
+    boss_roll_angle: f32,            // accumulated visual roll angle (for "rolling" surface)
+    boss_minion_spawn_timer: f32,    // phase 2 minion spawn countdown
+    boss_current_laser_length: f32,  // dynamic laser length so collision can match the visual
+    boss_laser_count: int,           // 1 in phase 1; 2-6 in phase 2 (scales with HP loss)
+
+    // Elite-tier scaling. Tier 0 = normal; 1 = silver (~2x base); 2 = gold (~4x base).
+    // speed_mult and dmg_mult are derived from tier at spawn so per-frame logic doesn't have
+    // to branch.
+    enemy_tier:    i32,
+    speed_mult:    f32,
+    dmg_mult:      f32,
+    boss_laser_slot_order: [6]int,   // permutation of 0..5; lasers fill these slots in order
+    boss_laser_fade_in_timer: f32,   // counts down from 1.0 to 0.0 while the most recent laser materialises
     boss_detection_print_cooldown: f32,
 
-    // --- SlowBoy Attack State ---
-    is_winding_up_attack: bool,
-    attack_windup_timer: f32,
-    has_locked_attack_trajectory: bool,
-    attack_charge_target_pos: m.vec2,
-    is_charging_attack: bool,
-    attack_charge_start_pos: m.vec2,
+    // --- AI sub-state (used by slowboy + sniper; type-specific interpretation) ---
+    ai_state:         i32,
+    ai_state_timer:   f32, // remaining seconds in current state
+    ai_state_total:   f32, // total duration of the current state (for normalised progress)
+    ai_target_pos:    m.vec2, // lock-on snapshot (slowboy) or aim target (sniper)
+    ai_origin_pos:    m.vec2, // anchor at the moment the current state started (slowboy charge)
 }
 
 Enemy_Instance_Data :: struct #align(16) {

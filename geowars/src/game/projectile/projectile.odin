@@ -5,6 +5,7 @@ import sapp "../../vendor/sokol/app"
 import rand "core:math/rand"
 import "core:math"
 import shared "../../shared"
+import particle "../particle"
 
 
 // --- Black Hole Projectile System (LMB Weapon) ---
@@ -59,19 +60,55 @@ update_and_instance_blackholes :: proc(dt: f32) -> int {
     for i in 0..<shared.MAX_BLACKHOLES {
         if !shared.state.blackholes[i].active { continue }
         p_bh := &shared.state.blackholes[i]
+        prev_life := p_bh.life_remaining
         p_bh.life_remaining -= dt
         if p_bh.life_remaining <= 0.0 { p_bh.active = false; continue }
         p_bh.pos += p_bh.vel * dt
         p_bh.rotation += p_bh.angular_vel * dt
         if p_bh.rotation > m.TAU { p_bh.rotation -= m.TAU }
         if p_bh.rotation < 0    { p_bh.rotation += m.TAU }
+
+        // Launch ramp: bullet starts as a pinprick and snaps to full size in LAUNCH_RAMP seconds.
+        // sqrt easing makes the visible "pop" hit hard at the very start.
+        time_alive := p_bh.life_max - p_bh.life_remaining
+        launch_progress := math.clamp(time_alive / shared.PROJECTILE_BLACKHOLE_LAUNCH_RAMP, 0.0, 1.0)
+        size_scale := math.sqrt(launch_progress)
+
+        // Travel wake: drop a small purple particle at fixed spacing once the bullet has fully
+        // launched. Detect interval crossings via time_alive vs. its previous-frame value so the
+        // cadence stays uniform regardless of frame rate.
+        if time_alive >= shared.PROJECTILE_BLACKHOLE_LAUNCH_RAMP {
+            prev_alive := p_bh.life_max - prev_life
+            interval := shared.PROJECTILE_BLACKHOLE_TRAIL_INTERVAL
+            if math.floor(time_alive / interval) > math.floor(prev_alive / interval) {
+                spawn_blackhole_trail_particle(p_bh^)
+            }
+        }
+
         life_ratio_bh := p_bh.life_remaining / p_bh.life_max
         if live_count_bh < shared.MAX_BLACKHOLES {
             inst_bh := &shared.state.blackhole_instance_data[live_count_bh]
-            inst_bh.instance_pos_size_rot = {p_bh.pos.x, p_bh.pos.y, p_bh.size, p_bh.rotation}
+            inst_bh.instance_pos_size_rot = {p_bh.pos.x, p_bh.pos.y, p_bh.size * size_scale, p_bh.rotation}
             inst_bh.instance_color = {1.0, 1.0, 1.0, life_ratio_bh}
             live_count_bh += 1
         }
     }
     return live_count_bh
+}
+
+@(private)
+spawn_blackhole_trail_particle :: proc(p: shared.Blackhole_Projectile) {
+    context = runtime.default_context()
+    drift_vel := p.vel * shared.PROJECTILE_BLACKHOLE_TRAIL_DRIFT
+    life := f32(shared.PROJECTILE_BLACKHOLE_TRAIL_LIFETIME)
+    size := f32(shared.PROJECTILE_BLACKHOLE_TRAIL_SIZE)
+    color := m.vec4{0.7, 0.4, 1.0, 0.85}
+    particle.emit_particle(shared.Particle{
+        pos = p.pos, vel = drift_vel, cloud_travel_vel = {0, 0},
+        color = color, size = size, start_size = size,
+        life_remaining = life, life_max = life, swirl_duration = 0,
+        rotation = p.rotation, angular_vel = 0,
+        charge_center_pos = {0, 0},
+        is_burst_particle = true, is_swirling_charge = false, active = false,
+    })
 }

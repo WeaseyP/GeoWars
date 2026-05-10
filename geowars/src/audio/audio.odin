@@ -609,6 +609,10 @@ init_audio :: proc() {
     } else {
         fmt.eprintf("!!! CRITICAL: Synth Track audio_buffer_init_copy failed! Error: %v\n", init_synth_track_ab_result);
     }
+
+    // Generate per-enemy music tracks + boss track. After this call, every track loops at
+    // volume 0; update_music in the per-frame loop fades them up/down based on alive enemies.
+    init_music_tracks()
 }
 
 geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_channels: c.int, user_data: rawptr) {
@@ -616,6 +620,7 @@ geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_
 }
 
 cleanup_audio :: proc() {
+    cleanup_music_tracks()
     ma.sound_uninit(&shared.state.lmb_sound); fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
     ma.audio_buffer_uninit(&lmb_sound_audio_buffer); fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
 

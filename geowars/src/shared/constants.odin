@@ -8,8 +8,8 @@ MAX_ENEMIES :: 128
 MAX_BLACKHOLES :: 64
 
 // --- Constants ---
-ORTHO_HEIGHT :: 1.5
-ARENA_RADIUS :: ORTHO_HEIGHT * 1.7    // 2.55. Bigger than the camera in both axes; deadzone-follow camera slides as the player pushes against the edge of the visible area.
+ORTHO_HEIGHT :: 1.5                    // half-height of the camera view in world units (left unchanged so the player and enemies keep their on-screen size)
+ARENA_RADIUS :: ORTHO_HEIGHT * 2.4     // 3.6 — significantly bigger than the camera so the deadzone-follow camera scrolls as the player explores. Off-screen sniper shots feel meaningful at this scale.
 ARENA_BOUNCE_DAMPING :: 0.6
 ARENA_RING_THICKNESS :: 0.025
 
@@ -35,7 +35,6 @@ LMB_PROJECTILE_DAMAGE     :: 2
 ENEMY_GRUNT_DAMAGE_VALUE :: 1
 
 // Black Hole (RMB) Constants
-BLACKHOLE_COOLDOWN_DURATION :: 1.0
 MAX_SPIN_SPEED            :: f32(m.PI * 2.0)
 SWIRL_CHARGE_DURATION_BASE  : f32 : 1.8
 SWIRL_CHARGE_DURATION_RAND  : f32 : 0.5
@@ -60,6 +59,20 @@ PROJECTILE_BLACKHOLE_INITIAL_SPEED :: 5.0
 PROJECTILE_BLACKHOLE_LIFETIME :: 3.0
 PROJECTILE_BLACKHOLE_SCALE :: 0.12
 PROJECTILE_BLACKHOLE_ANGULAR_VELOCITY :: m.PI * 1.5
+// Launch ramp + travel-wake polish.
+PROJECTILE_BLACKHOLE_LAUNCH_RAMP    :: f32(0.08)  // size scales 0->1 over this many seconds at spawn
+PROJECTILE_BLACKHOLE_TRAIL_INTERVAL :: f32(0.030) // spacing between wake particles
+PROJECTILE_BLACKHOLE_TRAIL_LIFETIME :: f32(0.28)
+PROJECTILE_BLACKHOLE_TRAIL_SIZE     :: f32(0.05)
+PROJECTILE_BLACKHOLE_TRAIL_DRIFT    :: f32(0.18)  // fraction of bullet velocity inherited by wake
+// Hit flash (non-kill impacts also get a small particle burst now).
+LMB_HIT_FLASH_COUNT          :: 8
+LMB_HIT_FLASH_SPEED_BASE     :: f32(2.0)
+LMB_HIT_FLASH_SPEED_RAND     :: f32(1.5)
+LMB_HIT_FLASH_LIFETIME_BASE  :: f32(0.18)
+LMB_HIT_FLASH_LIFETIME_RAND  :: f32(0.12)
+LMB_HIT_FLASH_SIZE_BASE      :: f32(0.022)
+LMB_HIT_FLASH_SIZE_RAND      :: f32(0.012)
 
 
 // --- Enemy Constants ---
@@ -70,32 +83,99 @@ ENEMY_SLOWBOY_BASE_SCALE :: 0.25
 ENEMY_SLOWBOY_GLOW_CANVAS_SF :: 1.0
 ENEMY_SLOWBOY_SPEED :: f32(0.15)
 ENEMY_SLOWBOY_MAX_HP :: 16
-// --- SlowBoy Attack Constants ---
-SLOWBOY_ATTACK_DETECT_RANGE :: ORTHO_HEIGHT * 0.8
-SLOWBOY_ATTACK_WINDUP_TOTAL_DURATION :: 1.5
+// --- SlowBoy Attack Constants (state machine) ---
+// Tightened: less prep, faster recover. Charge now spans a much larger arena fraction so the
+// slowboy is a real positional threat instead of a polite mascot.
+SLOWBOY_APPROACH_DURATION :: f32(2.0)
+SLOWBOY_WINDUP_DURATION   :: f32(1.3)
+SLOWBOY_CHARGE_DURATION   :: f32(0.30)
+SLOWBOY_RECOVER_DURATION  :: f32(0.6)
+SLOWBOY_CHARGE_DISTANCE   :: f32(ARENA_RADIUS * 0.7) // travels well over half the arena diameter
+SLOWBOY_SHAKE_MAX_AMPL    :: f32(0.07)
+SLOWBOY_SPIN_SPEED        :: f32(m.PI * 11.0)        // rad/s during charge — faster spin reads as nastier
 // --- Boss Chrome Orb Constants ---
-ENEMY_BOSS_CHROME_ORB_SCALE :: 0.2
-ENEMY_BOSS_CHROME_ORB_MAX_HP :: 100
-ENEMY_BOSS_CHROME_ORB_ANGULAR_VEL :: m.PI / 2.0
-ENEMY_BOSS_HORIZONTAL_SPEED :: 1.0
-ENEMY_BOSS_SPAWN_Y_OFFSET :: ORTHO_HEIGHT * 0.75
-ENEMY_BOSS_SCREEN_PADDING :: 0.2
-ENEMY_BOSS_VISION_ANGLE :: m.PI / 3.0
-ENEMY_BOSS_VISION_RANGE :: ORTHO_HEIGHT * 1.2
-ENEMY_BOSS_DETECTION_PRINT_COOLDOWN_TIME :: 1.0
-ENEMY_BOSS_VISION_RECT_WIDTH :: ORTHO_HEIGHT * 0.4
+// Visual + collision radius of the orb body. They're tied so the hitbox matches what the player sees.
+ENEMY_BOSS_VISUAL_RADIUS :: f32(0.18)
+ENEMY_BOSS_CHROME_ORB_SCALE :: ENEMY_BOSS_VISUAL_RADIUS * 2.0   // diameter — used as `current_size` for collision
+ENEMY_BOSS_CHROME_ORB_MAX_HP :: 200
+// Quad covers orb + worst-case laser length so the laser fits inside one instanced quad. Sized
+// to fit the longer phase-2 laser at the current ARENA_RADIUS.
+BOSS_QUAD_WORLD_DIAMETER :: 8.5
 
-BOSS_LASER_LENGTH :: ORTHO_HEIGHT
-BOSS_LASER_WIDTH  :: ENEMY_BOSS_VISION_RECT_WIDTH * 0.5
+// --- Boss orbit/laser geometry (shared by both phases) ---
+ENEMY_BOSS_ORBIT_RADIUS :: f32(ARENA_RADIUS * 0.25)     // boss circles a small inner ring
+ENEMY_BOSS_ORBIT_SPEED  :: f32(0.55)                    // rad/s; sign comes from boss_move_direction
+ENEMY_BOSS_LASER_LENGTH :: f32(ARENA_RADIUS * 1.05)     // long enough to cross the arena
+ENEMY_BOSS_LASER_SWEEP_SPEED :: f32(m.PI * 0.35)        // base sweep rate
+
+// --- Boss Phase 1 (single sweeping laser, slow grunt drip) ---
+// HP > 75% : clockwise. 75% > HP > 50% : counter-clockwise. Triggers phase 2 below 50%.
+ENEMY_BOSS_PHASE1_MINION_SPAWN_INTERVAL :: f32(4.5)     // grunt only, slow trickle
+
+// --- Boss Phase 2 (multi-laser fan, faster mixed minion mix, red colour) ---
+ENEMY_BOSS_PHASE2_SWEEP_BOOST :: f32(1.3)               // sweep is 30% faster in phase 2
+ENEMY_BOSS_PHASE2_MINION_SPAWN_INTERVAL :: f32(3.0)     // 1 minion every 3 seconds
+ENEMY_BOSS_PHASE2_SLOWBOY_CHANCE :: f32(0.25)           // 25% slowboy, 75% grunt
+ENEMY_BOSS_MAX_LASERS :: 6                              // shader/collision loop bound
+
+BOSS_LASER_WIDTH  :: f32(0.10)                          // visible beam width in world units
 BOSS_LASER_DAMAGE :: 1
 ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0
-BOSS_QUAD_WORLD_DIAMETER :: ORTHO_HEIGHT
 
 
-SLOWBOY_ATTACK_LOCKON_TIME_REMAINING :: 0.2
-SLOWBOY_ATTACK_CHARGE_SCREEN_FRACTION :: 0.5
-SLOWBOY_ATTACK_CHARGE_SPEED_FACTOR :: 3.0
 SLOWBOY_ATTACK_DAMAGE :: 1
+
+// --- Elite Tiers ---
+// 0 = normal, 1 = silver (2× base), 2 = gold (2× silver = 4× base). Tier multiplies HP, speed,
+// damage; size and color also shift. Used by wave 10's mini-boss directives.
+ELITE_TIER_SILVER     :: 1
+ELITE_TIER_GOLD       :: 2
+ELITE_HP_MULT_SILVER  :: f32(2.0)
+ELITE_HP_MULT_GOLD    :: f32(4.0)
+ELITE_SPEED_MULT_SILVER :: f32(1.6)  // capped below the strict 2x so the player can still kite
+ELITE_SPEED_MULT_GOLD   :: f32(2.4)
+ELITE_DMG_MULT_SILVER :: f32(2.0)
+ELITE_DMG_MULT_GOLD   :: f32(4.0)
+ELITE_SIZE_MULT_SILVER :: f32(1.25)
+ELITE_SIZE_MULT_GOLD   :: f32(1.55)
+
+// --- Splitter (asteroid-style) ---
+ENEMY_SPLITTER_SCALE       :: f32(0.30)
+ENEMY_SPLITTER_MAX_HP      :: i32(6)
+ENEMY_SPLITTER_SPEED       :: f32(0.30)
+ENEMY_SPLITTER_DEATH_ANIM  :: f32(1.0)
+ENEMY_SPLITTER_MINI_COUNT  :: 3
+ENEMY_SPLITTER_MINI_BURST_SPEED :: f32(1.2)
+
+// --- Sniper (telegraphed hitscan) ---
+ENEMY_SNIPER_SCALE         :: f32(0.22)
+ENEMY_SNIPER_MAX_HP        :: i32(3)
+ENEMY_SNIPER_DEATH_ANIM    :: f32(0.8)
+ENEMY_SNIPER_IDLE_DURATION    :: f32(0.5)
+ENEMY_SNIPER_AIM_DURATION     :: f32(1.5)
+ENEMY_SNIPER_AIM_LOCK_REMAINING :: f32(0.35) // lock target this many seconds before fire
+ENEMY_SNIPER_FIRE_DURATION    :: f32(0.18)
+ENEMY_SNIPER_COOLDOWN_DURATION :: f32(1.5)
+// Beam reaches well past the arena so the player can never hide off-screen from a sniper shot.
+ENEMY_SNIPER_BEAM_LENGTH      :: f32(ARENA_RADIUS * 3.6)
+ENEMY_SNIPER_QUAD_WORLD_DIAMETER :: f32(20.0)              // ≥ 2 * (BEAM_LENGTH + body) so beam fits
+ENEMY_SNIPER_BEAM_HALF_WIDTH  :: f32(0.04)
+ENEMY_SNIPER_DAMAGE           :: 1
+
+// --- Disruptor (button rusher) ---
+ENEMY_DISRUPTOR_SCALE      :: f32(0.16)
+ENEMY_DISRUPTOR_MAX_HP     :: i32(2)
+ENEMY_DISRUPTOR_SPEED      :: f32(0.7)
+ENEMY_DISRUPTOR_DEATH_ANIM :: f32(0.6)
+ENEMY_DISRUPTOR_BUTTON_PRESS_RANGE :: f32(0.30) // when this close to origin, presses the button
+ENEMY_DISRUPTOR_PUNISH_GRUNTS  :: 5             // grunts spawned around the perimeter on a successful press
+
+// --- Wave Button (interactable at arena origin) ---
+WAVE_BUTTON_PRESS_RANGE    :: f32(0.45)         // player must be within this radius of origin
+WAVE_BUTTON_PRESS_COOLDOWN :: f32(0.15)         // small debounce so a held key doesn't autofire
+WAVE_BUTTON_TOTAL_WAVES    :: 10
+WAVE_BUTTON_VISUAL_RADIUS  :: f32(0.16)
+WAVE_BUTTON_FLASH_DECAY    :: f32(2.5)          // press_flash decays at this rate per second
 // --- Common Enemy Constants ---
 ENEMY_SPAWN_INTERVAL :: 0.5
 ENEMY_SPAWN_BORDER_FRACTION :: 0.5
@@ -135,14 +215,20 @@ RMB_ENEMY_DEATH_PARTICLE_SIZE_BASE :: 0.015
 RMB_ENEMY_DEATH_PARTICLE_SIZE_RAND :: 0.005
 RMB_ENEMY_DEATH_PARTICLE_ANGULAR_VEL_MAX :: m.PI * 0.25
 RMB_PARTICLE_COLOR :: m.vec4{0.8, 0.3, 1.0, 0.9}
-RMB_AMMO_REGEN_INTERVAL :: 10.0
-MAX_RMB_AMMO_CHARGES    :: 2
-RMB_AMMO_INDICATOR_PARTICLES_PER_CHARGE :: 16
-RMB_AMMO_INDICATOR_ORBIT_RADIUS         :: PLAYER_SCALE * 0.5
-RMB_AMMO_INDICATOR_ORBIT_SPEED          :: m.PI * 0.8
-RMB_AMMO_INDICATOR_BASE_SIZE            :: 0.018
-RMB_AMMO_INDICATOR_COLOR                :: m.vec4{0.7, 0.4, 1.0, 0.75}
-RMB_AMMO_INDICATOR_SELF_SPIN_SPEED      :: m.PI * 0.6
+// --- RMB charge meter (continuous charge replaces the old discrete pip system) ---
+// Charge passively fills at RMB_CHARGE_RATE per second up to RMB_MAX_CHARGE_DEFAULT (200%).
+// RMB-press fires droplets scaled to current charge fraction; >=100% also emits a screen pulse.
+// Overcharge (charge > 1.0) keeps stacking droplets until the soft cap.
+RMB_MAX_CHARGE_DEFAULT     :: f32(2.0)
+RMB_CHARGE_RATE_DEFAULT    :: f32(0.10) // 10%/s — full charge in 10 s, max in 20 s
+RMB_BEAM_THRESHOLD         :: f32(1.0)  // pulse unlocks at 100% charge
+RMB_MIN_FIRE_CHARGE        :: f32(0.05) // ignore presses with essentially-empty charge
+// Pulse-on-overcharge geometry: how many ring-particles, how fast they expand, lifetime, size.
+RMB_PULSE_PARTICLE_COUNT   :: 32
+RMB_PULSE_PARTICLE_SPEED   :: f32(7.0)
+RMB_PULSE_PARTICLE_LIFETIME :: f32(0.45)
+RMB_PULSE_PARTICLE_SIZE    :: f32(0.06)
+RMB_PULSE_PARTICLE_COLOR   :: m.vec4{1.0, 0.45, 1.0, 0.95}
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7

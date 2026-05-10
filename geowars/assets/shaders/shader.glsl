@@ -21,6 +21,9 @@ layout(binding=0) uniform bg_fs_params {
     int bg_option;
     float player_hp_ratio;   // 1.0 = full HP, 0.0 = dead. Drives arena-ring colour shift.
     vec2 camera_pos;         // World position the camera is centred on (player_pos for follow camera).
+    vec4 wave_button_state;  // x=next_wave_idx (0..10), y=remaining (10-x), z=player_in_range, w=press_flash
+    vec4 shop_state;         // x=active (0/1), y=hovered_idx (-1..2), z=is_pre_boss, w=time_in_shop
+    vec4 shop_tiers;         // tier of card 0/1/2 (1.0/2.0/3.0); .w unused
 };
 out vec4 frag_color;
 
@@ -100,7 +103,7 @@ void main() { // fs_bg main
 
         // --- Arena Ring overlay ---
         // world_uv was already computed at the top of this branch.
-        const float ARENA_R = ORTHO_H * 1.7;        // matches shared.ARENA_RADIUS
+        const float ARENA_R = ORTHO_H * 2.4;        // matches shared.ARENA_RADIUS
         const float RING_HALF_W = 0.022;            // half-thickness of the visible ring
         float dist_from_center = length(world_uv);
 
@@ -120,6 +123,128 @@ void main() { // fs_bg main
         vec3 ring_base = mix(healthy_ring, danger_ring, danger);
         vec3 ring_color = ring_base * (0.85 + 0.15 * sin(time * pulse_rate));
         final_color = mix(final_color, ring_color, ring_alpha * 0.95);
+
+        // --- Wave Button (interactable at world origin) ---
+        // wave_button_state: x=next_idx, y=remaining_to_press, z=in_range, w=press_flash
+        float btn_remaining   = wave_button_state.y;          // 10..0
+        float btn_in_range    = wave_button_state.z;
+        float btn_flash       = wave_button_state.w;
+        const float BTN_R     = 0.16;                         // matches WAVE_BUTTON_VISUAL_RADIUS
+        float btn_dist        = length(world_uv);
+        if (btn_remaining > 0.5 && btn_dist < BTN_R * 4.0) {
+            // Outer halo grows when player in range
+            float halo_outer  = BTN_R * mix(1.6, 2.6, btn_in_range) + btn_flash * 0.6;
+            float halo_alpha  = (1.0 - smoothstep(BTN_R * 0.95, halo_outer, btn_dist)) * 0.45;
+            float halo_pulse  = 0.7 + 0.3 * sin(time * mix(2.0, 5.5, btn_in_range));
+            vec3  halo_col    = mix(vec3(0.55, 0.9, 1.0), vec3(1.0, 0.85, 0.4), btn_in_range);
+            final_color += halo_col * halo_alpha * halo_pulse * mix(0.5, 1.2, btn_in_range);
+
+            // Outer ring of the button itself
+            float outer_ring  = abs(btn_dist - BTN_R);
+            float ring_alpha2 = 1.0 - smoothstep(0.0, 0.018, outer_ring);
+            final_color = mix(final_color, vec3(0.85, 0.95, 1.0) + halo_col * 0.4, ring_alpha2);
+
+            // Inner core (a faceted hexagonal feel via 6-arm sin modulation)
+            float btn_angle = atan(world_uv.y, world_uv.x);
+            float arm = 0.5 + 0.5 * cos(btn_angle * 6.0 + time * 0.8);
+            float inner_r = BTN_R * (0.55 + 0.05 * arm);
+            float inner_alpha = 1.0 - smoothstep(inner_r - 0.012, inner_r + 0.012, btn_dist);
+            vec3 core_col = mix(vec3(0.30, 0.55, 0.95), vec3(1.0, 0.95, 0.4), btn_flash);
+            core_col *= 0.7 + 0.5 * (0.5 + 0.5 * sin(time * 3.0));
+            final_color = mix(final_color, core_col, inner_alpha * (0.55 + 0.45 * btn_in_range));
+
+            // Pip indicators around the ring: one filled pip per remaining wave to press.
+            int remaining_int = int(btn_remaining + 0.5);
+            const int MAX_PIPS = 10;
+            const float PIP_R = 0.025;
+            float pip_orbit = BTN_R + 0.06;
+            for (int p = 0; p < MAX_PIPS; ++p) {
+                if (p >= remaining_int) break;
+                float pip_angle = float(p) * (6.28318530718 / float(MAX_PIPS)) - 1.5707963 + time * 0.12;
+                vec2 pip_pos = vec2(cos(pip_angle), sin(pip_angle)) * pip_orbit;
+                float d = length(world_uv - pip_pos);
+                float pip_alpha = 1.0 - smoothstep(PIP_R - 0.006, PIP_R, d);
+                vec3 pip_col = vec3(0.85, 0.95, 1.0) * (0.6 + 0.4 * sin(time * 3.0 + float(p)));
+                final_color = mix(final_color, pip_col, pip_alpha);
+            }
+        }
+
+        // --- SHOP overlay ---
+        // Drawn last on top of everything else in the bg pass: a dim overlay + 3 rounded cards
+        // at fixed screen-NDC positions. Card-rect geometry duplicated in game/shop/shop.odin
+        // for hover detection.
+        if (shop_state.x > 0.5) {
+            // Rebuild NDC from gl_FragCoord (y already flipped earlier above).
+            vec2 ndc = (gl_FragCoord.xy / resolution) * 2.0 - 1.0;
+            ndc.y = -ndc.y; // flip back to "y up = top"
+            // Dim the world.
+            final_color = mix(final_color, vec3(0.02, 0.02, 0.04), 0.78);
+
+            const float CARD_HALF_W = 0.20;
+            const float CARD_HALF_H = 0.30;
+            const float CARD_Y      = -0.05;
+            const float CARD_R      = 0.04; // corner-radius approximation via inset SDF
+            float centres[3];
+            centres[0] = -0.55; centres[1] = 0.0; centres[2] = 0.55;
+            float tiers[3];
+            tiers[0] = shop_tiers.x; tiers[1] = shop_tiers.y; tiers[2] = shop_tiers.z;
+            int hovered = int(shop_state.y);
+
+            for (int i = 0; i < 3; ++i) {
+                float cx = centres[i];
+                vec2 d = abs(vec2(ndc.x - cx, ndc.y - CARD_Y)) - vec2(CARD_HALF_W - CARD_R, CARD_HALF_H - CARD_R);
+                float card_sdf = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - CARD_R;
+                if (card_sdf > 0.012) continue;
+
+                int t = int(tiers[i] + 0.5);
+                vec3 fill = vec3(0.10, 0.12, 0.18);
+                vec3 accent;
+                if (t == 1) accent = vec3(0.45, 0.85, 1.00); // common — cyan
+                else if (t == 2) accent = vec3(0.85, 0.55, 1.00); // uncommon — purple
+                else accent = vec3(1.00, 0.80, 0.30); // rare — gold
+
+                bool is_hovered = (i == hovered);
+                if (is_hovered) {
+                    fill   *= 1.6;
+                    accent *= 1.25;
+                }
+
+                // Rounded rect fill (alpha falls off at the edge).
+                float fill_alpha  = smoothstep(0.0, -0.005, card_sdf);
+                float border_d    = abs(card_sdf + 0.012);
+                float border_alpha = smoothstep(0.012, 0.0, border_d);
+
+                // Inner glow accent at the top edge as a "tier banner".
+                float top_edge = abs((ndc.y - (CARD_Y + CARD_HALF_H * 0.78))) - 0.014;
+                float banner = 1.0 - smoothstep(0.0, 0.020, top_edge);
+                banner *= step(card_sdf, -0.003); // only inside card
+
+                vec3 card_color = mix(fill, accent * 1.8, border_alpha);
+                card_color = mix(card_color, accent, banner * 0.85);
+
+                final_color = mix(final_color, card_color, fill_alpha);
+            }
+        }
+
+        // --- Low-HP screen feedback ---
+        // Vignette darkening + red tint that intensifies as HP drops, with a heartbeat pulse
+        // whose rate climbs near death. Lives in fs_bg so it covers everything not painted by
+        // the foreground passes (players/enemies stay at full brightness, but the surrounding
+        // arena reads as panicked).
+        float low_hp_t = pow(clamp(1.0 - player_hp_ratio, 0.0, 1.0), 1.3);
+        if (low_hp_t > 0.001) {
+            float pulse_rate_lo = mix(1.5, 6.0, low_hp_t);
+            float heartbeat = 0.7 + 0.3 * pow(0.5 + 0.5 * sin(time * pulse_rate_lo), 4.0);
+            vec2 screen_uv = gl_FragCoord.xy / resolution;
+            vec2 from_centre = screen_uv - 0.5;
+            from_centre.x *= resolution.x / resolution.y;
+            float vignette_dist = length(from_centre);
+            float vignette = smoothstep(0.25, 0.75, vignette_dist);
+            final_color *= mix(1.0, 0.45, vignette * low_hp_t * heartbeat);
+            vec3 red_tint = vec3(1.0, 0.15, 0.18);
+            float red_amount = low_hp_t * (vignette * 0.85 + 0.15) * heartbeat * 0.55;
+            final_color = mix(final_color, red_tint, red_amount);
+        }
 
         frag_color = vec4(clamp(final_color, 0.0, 1.0), 1.0);
     }
@@ -150,6 +275,11 @@ layout(binding=1) uniform Player_Fs_Params {
     vec2 dash_trail_positions;
     float dash_trail_count_uniform;
     float is_dashing_uniform;
+    vec2 player_aim_dir;            // unit vector from player toward mouse (world space)
+    float lmb_fire_flash;            // 0..1, set to 1 on LMB fire and decayed each frame
+    float rmb_fire_flash;            // 0..1, set to 1 on RMB fire and decayed each frame
+    float rmb_charge_ratio;          // current rmb_charge / RMB_BEAM_THRESHOLD; 0..1 = filling, >=1 = beam-ready, can exceed for overcharge
+    float rmb_max_charge_ratio;      // soft cap (eff_rmb_max_charge / RMB_BEAM_THRESHOLD), used to scale the ring's "overcharge" portion
 };
 in vec2 v_uv;
 out vec4 frag_color;
@@ -218,14 +348,42 @@ void main() {
     ring1_alpha = smoothstep(0.004, 0.0, r1_dist_sdf);
     if (hp <= 0.01) ring1_alpha = 0.0;
 
-    // Ring 2
+    // Ring 2 — segmented HP indicator. N = max_hp arc segments around the player; lit segment
+    // means "1 HP point remaining". Lost slots dim out and pulse with a heartbeat that speeds
+    // up as more HP is missing, so the player both *counts* lit segments and *feels* damage.
     float r2_rot = anim_time * 1.1; float r2_squash = 0.4 + 0.6 * abs(sin(anim_time * 1.1 + 0.5));
     mat2 r2_invRot = rotate2d(-r2_rot); mat2 r2_invScale = mat2(1.0, 0.0, 0.0, 1.0 / r2_squash);
     vec2 p2_uv = r2_invScale * r2_invRot * p_orig;
     float r2_rad_anim = 0.18 + 0.01 * sin(anim_time * 12.0);
-    float r2_thick = 0.01;
+    float r2_thick = 0.012;            // slightly thicker so segments read at small max_hp
     float r2_dist_sdf = abs(sdCircle(p2_uv, r2_rad_anim)) - r2_thick * 0.5;
-    ring2_alpha = smoothstep(0.003, 0.0, r2_dist_sdf);
+    float r2_band_alpha = smoothstep(0.003, 0.0, r2_dist_sdf);
+
+    float seg_alpha_mul = 1.0;
+    float seg_brightness = 1.0;
+    if (max_hp > 0.5) {
+        // Segment angle in [0,1) measured from +X axis, counter-clockwise. Use the ring's local
+        // (rotated, squashed) frame so segments don't wobble with the existing ring animation.
+        float seg_angle = atan(p2_uv.y, p2_uv.x);
+        float frac = mod(seg_angle / 6.28318530718 + 1.0, 1.0);
+        float per_seg = 1.0 / max_hp;
+        float seg_local = fract(frac * max_hp);          // 0..1 within the current segment
+        float seg_idx_f = floor(frac * max_hp);
+        // Tiny dark slivers at segment boundaries make the count visually distinct.
+        float gap = smoothstep(0.0, 0.04, seg_local) * smoothstep(1.0, 0.96, seg_local);
+        bool lit = seg_idx_f < hp - 0.5;
+        if (lit) {
+            seg_alpha_mul = gap;
+        } else {
+            // Dim + heartbeat for lost slots. Pulse rate climbs with damage.
+            float damage_t = clamp(1.0 - hp / max_hp, 0.0, 1.0);
+            float pulse_rate_hp = mix(2.0, 6.0, damage_t);
+            float heartbeat_lo = 0.5 + 0.5 * sin(direct_tick * pulse_rate_hp);
+            seg_alpha_mul = (0.16 + 0.10 * heartbeat_lo * damage_t) * gap;
+            seg_brightness = 0.55;     // lost slots are also colour-darkened
+        }
+    }
+    ring2_alpha = r2_band_alpha * seg_alpha_mul;
     if (hp <= 0.01) ring2_alpha = 0.0;
 
     // --- SDF for Health-Based Glow ---
@@ -248,15 +406,104 @@ void main() {
     glow_alpha_contrib = glow_intensity_val * 0.6;
     if (hp <= 0.01) glow_alpha_contrib = 0.0;
 
+    // --- Aim Indicator Blade ---
+    // A bright triangular blade sits on the outer ring pointing toward the cursor, plus a thin
+    // shaft extending back into the body. Together they form an unmistakable arrow so the player
+    // always reads where they're aiming without looking at the cursor.
+    float blade_alpha = 0.0;
+    float shaft_alpha = 0.0;
+    vec3  blade_color = vec3(1.0, 1.0, 0.75);
+    if (length(player_aim_dir) > 0.01 && hp > 0.01) {
+        vec2 aim_n  = normalize(player_aim_dir);
+        vec2 perp_n = vec2(-aim_n.y, aim_n.x);
+        float along  = dot(p_orig, aim_n);
+        float across = dot(p_orig, perp_n);
+        float blade_centre   = 0.30;             // pushed outward so it sits clear of the rings
+        float blade_half_len = 0.10;             // longer tip
+        float blade_half_wid = 0.062;            // wider base
+        float along_local = along - (blade_centre - blade_half_len);
+        if (along_local >= 0.0 && along_local <= 2.0 * blade_half_len) {
+            float taper = 1.0 - (along_local / (2.0 * blade_half_len));
+            float wid   = blade_half_wid * taper;
+            float aa    = 0.005;
+            float side  = abs(across) - wid;
+            blade_alpha = smoothstep(aa, -aa, side);
+        }
+        // Thin shaft from outer ring (along ~ 0.13) up to the blade base (along ~ 0.20).
+        float shaft_start = 0.13;
+        float shaft_end   = blade_centre - blade_half_len;
+        if (along >= shaft_start && along <= shaft_end) {
+            float shaft_aa = 0.004;
+            float shaft_side = abs(across) - 0.012;
+            shaft_alpha = smoothstep(shaft_aa, -shaft_aa, shaft_side) * 0.7;
+        }
+        // Subtle idle pulse so the arrow reads as "active". No on-character LMB-fire boost —
+        // the shot's "click" lives entirely on the projectile, so the player itself doesn't flash.
+        float pulse = 0.85 + 0.15 * sin(direct_tick * 8.0);
+        blade_alpha *= pulse;
+        shaft_alpha *= pulse;
+    }
+
+    // --- RMB Charge Ring ---
+    // Continuous arc around the player that fills with rmb_charge_ratio. 0..1 fills clockwise
+    // from the top; at 1.0 the ring is closed. Overcharge (>1) thickens & brightens the ring.
+    float charge_alpha = 0.0;
+    vec3  charge_color = vec3(0.85, 0.5, 1.0);
+    if (hp > 0.01 && rmb_charge_ratio > 0.001) {
+        float r_play = length(p_orig);
+        // Place the ring just outside the outer health ring, inside the aim blade region.
+        float ring_r = 0.255;
+        float ring_thick = 0.012 + 0.008 * clamp(rmb_charge_ratio - 1.0, 0.0, 1.0);
+        float ring_dist = abs(r_play - ring_r);
+        if (ring_dist < ring_thick + 0.006) {
+            // Sweep angle: fill clockwise from -90° (top of player) by 2π * fraction (cap at full circle).
+            float angle = atan(p_orig.y, p_orig.x);              // -PI..PI
+            // Convert to a 0..1 fraction starting at the top (-PI/2), going clockwise.
+            const float TAU = 6.28318530718;
+            float swept = mod(1.5707963 - angle, TAU) / TAU;
+            float fill_frac = clamp(rmb_charge_ratio, 0.0, 1.0);
+            // Once charge >= 100% the entire ring is on. Overcharge keeps it brightened.
+            float in_arc = (rmb_charge_ratio >= 1.0) ? 1.0 : step(swept, fill_frac);
+            float ring_smooth = smoothstep(ring_thick, ring_thick - 0.006, ring_dist);
+            charge_alpha = ring_smooth * in_arc * (0.65 + 0.35 * clamp(rmb_charge_ratio, 0.0, 1.5));
+            // Beam-ready pulse: when at-or-over 100%, throb the ring so player notices.
+            if (rmb_charge_ratio >= 1.0) {
+                float throb = 0.7 + 0.3 * sin(direct_tick * 7.0);
+                charge_alpha *= throb;
+                charge_color = mix(vec3(0.85, 0.5, 1.0), vec3(1.0, 0.95, 1.0), 0.6);
+            }
+        }
+    }
+
+    // --- RMB Inward Suck ---
+    // Just before the swirling charge spawns, drag a few faint rings inward toward the core so
+    // the player feels the "absorb" beat before the visual explosion outward.
+    float suck_alpha = 0.0;
+    if (rmb_fire_flash > 0.001 && hp > 0.01) {
+        float r2          = length(p_orig);
+        float suck_phase  = 1.0 - rmb_fire_flash;             // 0..1 as flash decays
+        // Two concentric inward-collapsing rings.
+        float ring_a = smoothstep(0.025, 0.0, abs(r2 - mix(0.32, 0.06, suck_phase)));
+        float ring_b = smoothstep(0.025, 0.0, abs(r2 - mix(0.40, 0.14, suck_phase)));
+        suck_alpha   = (ring_a + ring_b * 0.6) * rmb_fire_flash;
+    }
+
     // --- Combine Colors Additively & Determine Final Alpha ---
     vec3 combined_color = vec3(0.0);
     combined_color += player_glow_color * glow_shape_alpha; // Health-based glow first (behind other elements)
     combined_color += color_glow_dynamic * glow_alpha_contrib * 2.0; // Existing dynamic glow/spikes
-    combined_color += color_ring2_health_based * ring2_alpha;
+    combined_color += color_ring2_health_based * ring2_alpha * seg_brightness;
     combined_color += color_ring1_default * 1.5 * ring1_alpha; // Apply brightness multiplier here
     combined_color += color_core_default * core_alpha;
-    
-    float final_alpha = max(max(max(core_alpha, ring1_alpha), max(ring2_alpha, glow_alpha_contrib)), glow_shape_alpha); // Include new glow_shape_alpha
+    combined_color += blade_color * blade_alpha * 1.4;
+    combined_color += blade_color * shaft_alpha;
+    combined_color += vec3(0.85, 0.5, 1.0) * suck_alpha * 1.8;
+    combined_color += charge_color * charge_alpha * 1.2;
+
+    float final_alpha = max(max(max(core_alpha, ring1_alpha), max(ring2_alpha, glow_alpha_contrib)), glow_shape_alpha);
+    final_alpha = max(final_alpha, max(blade_alpha, shaft_alpha));
+    final_alpha = max(final_alpha, suck_alpha);
+    final_alpha = max(final_alpha, charge_alpha);
 
     // --- Apply Flash Overlay (if invulnerable and alive) ---
     if (invul_timer > 0.001 && invul_duration > 0.001 && hp > 0.01) {
@@ -480,7 +727,10 @@ void main() {
                                                            // If the quad is rotated by v_enemy_main_rotation_fs, then uv_centered calculations in FS might be off
                                                            // if they assume a non-rotated quad. Let's assume boss quad is not rotated by this aiming angle.
     if (instance_enemy_type_vs_in > 1.5 && instance_enemy_type_vs_in < 2.5) { // BOSS_CHROME_ORB
-         rotated_quad_pos = scaled_quad_pos; // No instance-level rotation for boss quad, its visuals are rotation-invariant or handled in FS
+         rotated_quad_pos = scaled_quad_pos; // No instance-level rotation for boss quad
+    }
+    if (instance_enemy_type_vs_in > 3.5 && instance_enemy_type_vs_in < 4.5) { // SNIPER (telegraph in FS)
+         rotated_quad_pos = scaled_quad_pos;
     }
 
 
@@ -539,239 +789,475 @@ void main() {
 
     // --- BOSS_CHROME_ORB Rendering Path ---
     if (v_enemy_type_fs > 1.5 && v_enemy_type_fs < 2.5) { // BOSS_CHROME_ORB (type 2.0)
-        // p_scaled_uv is the coordinate space where SDFs are defined, ranges roughly -1.5 to 1.5
-        vec2 p_scaled_uv = uv_centered * enemy_visual_scale_on_quad;
+        // p_scaled_uv ranges -1.5..1.5. enemy_visual_scale_fs_out is BOSS_QUAD_WORLD_DIAMETER, so the
+        // world<->p_scaled_uv conversion factor is enemy_visual_scale_on_quad / quad_world_diameter.
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        float w2u = (enemy_visual_scale_fs_out > 0.001) ? (enemy_visual_scale_on_quad / enemy_visual_scale_fs_out) : 1.0;
 
-        float sphere_radius_scaled_uv = 0.45 / 5.0; 
-        float dist_to_center_scaled_uv = length(p_scaled_uv);
-        float sphere_sdf = dist_to_center_scaled_uv - sphere_radius_scaled_uv;
-        float sphere_aa = 0.02;
-        float sphere_alpha = smoothstep(sphere_aa, 0.0, sphere_sdf);
+        // Effect params (alive):  x=is_dying, y=roll_angle, z=laser_length_world, w=phase
+        // Effect params (dying):  x=1,        y=death_off,  z=part_scale,         w=dying_alpha_mult
+        float is_dying       = enemy_effect_params_fs.x;
+        float roll_angle     = (is_dying > 0.5) ? 0.0 : enemy_effect_params_fs.y;
+        float laser_length_w = (is_dying > 0.5) ? 0.0 : enemy_effect_params_fs.z;
+        float w_param        = enemy_effect_params_fs.w;
+        float dying_alpha    = (is_dying > 0.5) ? w_param : 1.0;
+        float boss_phase     = (is_dying > 0.5) ? 1.0    : w_param;
+        float aim_angle      = v_enemy_main_rotation_fs;
 
-        vec3 base_orb_color = vec3(0.75, 0.75, 0.8); 
-        vec3 highlight_color = vec3(1.0, 1.0, 1.0);
-        float highlight_pos = 0.3; 
-        // Highlight independent of boss rotation, simple X-based highlight on the sphere
-        float highlight_intensity = smoothstep(0.0, 0.8, max(0.0, p_scaled_uv.x + highlight_pos)); 
-        vec3 orb_color = mix(base_orb_color, highlight_color, highlight_intensity * 0.5);
+        // hp_ratio comes from color.r; laser count from color.b * 10; fade-in timer from color.a.
+        float hp_ratio       = clamp(enemy_color_out_fs.r, 0.0, 1.0);
+        int   laser_count    = int(enemy_color_out_fs.b * 10.0 + 0.5);
+        float fade_in_timer  = clamp(enemy_color_out_fs.a, 0.0, 1.0);
+        if (laser_count < 1) laser_count = 1;
+        if (laser_count > 6) laser_count = 6;
 
-        // Black circle ("eye") orbits the main sphere, aligned with v_enemy_main_rotation_fs (aiming direction)
-        float circle_orbit_radius_scaled_uv = sphere_radius_scaled_uv * 0.6;
-        // Corrected: black circle at the front, aligned with aiming direction
-        vec2 black_circle_center_offset_scaled_uv = vec2(cos(v_enemy_main_rotation_fs), sin(v_enemy_main_rotation_fs)) * circle_orbit_radius_scaled_uv;
-        
-        float black_circle_radius_scaled_uv = 0.1 / 5.0;
-        // SDF for black circle relative to its own center
-        float black_circle_sdf = length(p_scaled_uv - black_circle_center_offset_scaled_uv) - black_circle_radius_scaled_uv;
-        float black_circle_aa = 0.015;
-        float black_circle_alpha = smoothstep(black_circle_aa, 0.0, black_circle_sdf);
+        // Decode the 6-element slot permutation packed as base-6 in color.g (max 46655).
+        int slot_order[6];
+        {
+            int e = int(enemy_color_out_fs.g + 0.5);
+            slot_order[0] = e - (e / 6) * 6; e = e / 6;
+            slot_order[1] = e - (e / 6) * 6; e = e / 6;
+            slot_order[2] = e - (e / 6) * 6; e = e / 6;
+            slot_order[3] = e - (e / 6) * 6; e = e / 6;
+            slot_order[4] = e - (e / 6) * 6; e = e / 6;
+            slot_order[5] = e - (e / 6) * 6;
+        }
 
-        vec3 final_boss_color_rgb = mix(orb_color, vec3(0.0, 0.0, 0.0), black_circle_alpha); 
-        float combined_alpha = sphere_alpha; // Base alpha from sphere
+        // World-unit constants for the orb body and the laser beam.
+        const float ORB_RADIUS_W   = 0.18;  // matches ENEMY_BOSS_VISUAL_RADIUS
+        const float LASER_WIDTH_W  = 0.10;  // matches BOSS_LASER_WIDTH
+        const float TWO_PI         = 6.28318530718;
+        const float SLOT_STEP      = TWO_PI / 6.0;
 
-        // Vision Rectangle Visualization (NOW THE DEATH LASER)
-        float is_dying = enemy_effect_params_fs.x;
-        vec3 laser_color_core = vec3(1.0, 0.5, 0.5);    // Bright Reddish Core
-        // vec3 laser_color_glow = vec3(1.0, 0.2, 0.2); // Not used directly for now
-        float laser_alpha = 0.0;
+        float orb_r  = ORB_RADIUS_W * w2u;
+        float dist_p = length(p);
+        // Phase 2 chaos factor (0 at HP=50%, 1 at HP=0%) drives pulsing/sparks intensity.
+        float chaos  = (boss_phase > 1.5) ? clamp((0.5 - hp_ratio) * 2.0, 0.0, 1.0) : 0.0;
 
-        if (is_dying < 0.5) { // Only draw laser if not dying
-            float vision_rect_width_world = enemy_effect_params_fs.z;  // This is ENEMY_BOSS_VISION_RECT_WIDTH (world units)
-            float vision_rect_length_world = enemy_effect_params_fs.w; // This is ENEMY_BOSS_VISION_RANGE (world units)
+        // ---------- Multi-laser fan (capsule SDF, looped) ----------
+        float laser_length_p = laser_length_w * w2u;
+        float laser_half_p   = (LASER_WIDTH_W * 0.5) * w2u;
+        float beam_core_acc  = 0.0;
+        float beam_glow_acc  = 0.0;
 
-            // enemy_visual_scale_fs_out is (world_size_of_boss_entity * 3.0)
-            // To convert world units (like vision_rect_width_world) to the p_scaled_uv space (where extent is 1.5):
-            // world_unit_in_p_scaled_uv = world_unit * (1.5 / (enemy_visual_scale_fs_out / 2.0) )
-            // world_unit_in_p_scaled_uv = world_unit * (3.0 / enemy_visual_scale_fs_out)
-            // This is effectively: world_unit / world_size_of_boss_entity
-            
-            // Simpler: enemy_visual_scale_fs_out already contains current_size * 3.0.
-            // The p_scaled_uv space is uv_centered * 3.0.
-            // A distance D in world units corresponds to D / (current_size / 2.0) in uv_centered units (approx if current_size is diameter).
-            // Or D / (enemy_visual_scale_fs_out / (2.0 * 3.0) )
-            // D * 6.0 / enemy_visual_scale_fs_out in uv_centered units.
-            // Then D * 6.0 / enemy_visual_scale_fs_out * 3.0 in p_scaled_uv units.
-            // = D * 18.0 / enemy_visual_scale_fs_out
+        // Bound the loop so the compiler can unroll; break early when we exceed laser_count.
+        const int MAX_LASERS = 6;
+        for (int k = 0; k < MAX_LASERS; ++k) {
+            if (k >= laser_count) break;
+            int   slot       = slot_order[k];
+            float beam_angle = aim_angle + float(slot) * SLOT_STEP;
 
-            // Let's use the provided world_to_working_uv_factor logic path, ensure factors are correct.
-            // enemy_visual_scale_fs_out is instance_visual_scale_vs_in from VS, which is current_size * 3.0 from Odin.
-            // float world_to_working_uv_factor = enemy_visual_scale_on_quad / (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad); ??? No.
-            // world_to_working_uv_factor should convert world units to p_scaled_uv units.
-            // 1 unit in p_scaled_uv = ( (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad) / 2.0 ) / 1.5 world units.
-            // = ( (current_size*3.0 / 3.0) / 2.0 ) / 1.5 = (current_size / 2.0) / 1.5 = current_size / 3.0 world units.
-            // So, 1 world unit = 3.0 / current_size in p_scaled_uv units.
-            float world_to_p_scaled_uv_factor;
-            if (enemy_visual_scale_fs_out > 0.001) { // Check if enemy_visual_scale_fs_out is not zero
-                 world_to_p_scaled_uv_factor = enemy_visual_scale_on_quad / enemy_visual_scale_fs_out;
+            // Fade factor: only the most recently added laser fades in (1 - timer); earlier beams full.
+            float fade = 1.0;
+            if (k == laser_count - 1 && fade_in_timer > 0.0) {
+                fade = clamp(1.0 - fade_in_timer, 0.0, 1.0);
+            }
+
+            vec2 aim_k  = vec2(cos(beam_angle), sin(beam_angle));
+            vec2 perp_k = vec2(-aim_k.y, aim_k.x);
+            vec2 origin_k = aim_k * orb_r;
+            vec2 rel_k    = p - origin_k;
+            float along   = dot(rel_k, aim_k);
+            float across  = dot(rel_k, perp_k);
+
+            float capsule_sdf;
+            if (along < 0.0) {
+                capsule_sdf = length(rel_k) - laser_half_p;
+            } else if (along > laser_length_p) {
+                capsule_sdf = length(rel_k - aim_k * laser_length_p) - laser_half_p;
             } else {
-                 world_to_p_scaled_uv_factor = 1.0; // Avoid division by zero, assign a fallback
+                capsule_sdf = abs(across) - laser_half_p;
             }
-            float rect_width_p_scaled_uv = vision_rect_width_world * world_to_p_scaled_uv_factor; 
-            float rect_length_p_scaled_uv = vision_rect_length_world * world_to_p_scaled_uv_factor * 100;
 
-            // Laser Direction (same as boss aiming direction)
-            vec2 vision_direction = normalize(vec2(cos(v_enemy_main_rotation_fs), sin(v_enemy_main_rotation_fs)));
-            
-            // Laser Origin (center of the black circle, in p_scaled_uv space)
-            vec2 laser_origin_p_scaled_uv = black_circle_center_offset_scaled_uv; 
-            
-            // Current fragment's position relative to laser origin
-            vec2 pixel_rel_to_laser_origin_p_scaled_uv = p_scaled_uv - laser_origin_p_scaled_uv;
+            float laser_aa  = laser_half_p * 0.4 + 0.001;
+            float beam_pulse = 0.75 + 0.25 * sin(tick * 14.0 - along * 18.0 + float(slot) * 1.7);
+            float core_k     = smoothstep(laser_aa, -laser_aa, capsule_sdf) * beam_pulse;
+            float glow_k     = smoothstep(laser_half_p * 5.0, 0.0, max(0.0, capsule_sdf));
+            // Striations
+            float strands_k  = 0.5 + 0.5 * sin(across * 90.0 + tick * 24.0 + along * 8.0);
+            core_k          *= 0.85 + 0.15 * strands_k;
 
-            // Project onto laser's local axes
-            float local_x = dot(pixel_rel_to_laser_origin_p_scaled_uv, vec2(-vision_direction.y, vision_direction.x)); // Perpendicular distance
-            float local_y = dot(pixel_rel_to_laser_origin_p_scaled_uv, vision_direction); // Distance along laser
-
-            // Make the visual laser thinner
-            float visual_laser_half_width_p_scaled_uv = (rect_width_p_scaled_uv * 0.05);
-
-            bool in_width = abs(local_x) < visual_laser_half_width_p_scaled_uv;
-            // Laser starts from the black circle's center (local_y=0) and extends outwards
-            bool in_length = (local_y > -0.001) && (local_y < rect_length_p_scaled_uv); 
-
-            if (in_width && in_length) {
-                // No need for the old dist_of_pixel_from_orb_center_working_uv clip here.
-                // The laser is defined relative to the black circle and extends outwards.
-                
-                float intensity_from_centerline = 1.0 - smoothstep(0.0, visual_laser_half_width_p_scaled_uv, abs(local_x));
-                intensity_from_centerline = pow(intensity_from_centerline, 1.2); // Sharper core
-
-                float pulse = 0.7 + 0.3 * sin(tick * 15.0 + local_y * 0.05); // Modulate pulse by distance along laser slightly
-                
-                laser_alpha = intensity_from_centerline * pulse * 0.9; 
+            // While fading in, the new beam shimmers more (extra strand modulation).
+            if (fade < 1.0) {
+                float charge_flicker = 0.5 + 0.5 * sin(tick * 40.0 + along * 12.0);
+                core_k *= mix(charge_flicker, 1.0, fade);
+                glow_k *= mix(0.6, 1.0, fade);
             }
-        } 
 
-        // Blend laser with existing boss color
-        if (laser_alpha > 0.01) {
-            final_boss_color_rgb += laser_color_core * laser_alpha * 1.5; // Boost laser brightness (additive-like)
-            combined_alpha = max(combined_alpha, laser_alpha * 0.8f); // Laser contributes to overall alpha
+            beam_core_acc += core_k * fade;
+            beam_glow_acc += glow_k * fade;
         }
 
-        // Dying effect modulation
-        float overall_dying_alpha_multiplier = enemy_color_out_fs.a; 
-        if (is_dying > 0.5) { 
-            overall_dying_alpha_multiplier = enemy_effect_params_fs.w; 
-        }
-        combined_alpha *= overall_dying_alpha_multiplier; 
+        // Phase-driven beam colours: phase 1 stays magenta-ish; phase 2 goes hot red.
+        vec3 laser_core_rgb = (boss_phase > 1.5) ? vec3(1.0, 0.85, 0.55) : vec3(1.0, 0.95, 0.65);
+        vec3 laser_glow_rgb = (boss_phase > 1.5) ? vec3(1.0, 0.30, 0.35) : vec3(1.0, 0.50, 0.85);
+        vec3 laser_rgb      = laser_core_rgb * beam_core_acc + laser_glow_rgb * beam_glow_acc * 0.95;
+        float laser_alpha   = clamp(beam_core_acc + beam_glow_acc * 0.55, 0.0, 1.0);
+        if (laser_length_w <= 0.001) { laser_alpha = 0.0; laser_rgb = vec3(0.0); }
 
-        frag_color = vec4(clamp(final_boss_color_rgb,0.0,1.5), clamp(combined_alpha,0.0,1.0));
-        if (frag_color.a < 0.01) { discard; }
-        return; 
-    } 
-    // --- SlowBoy Rendering Path ---
-    else if (v_enemy_type_fs > 0.5) { 
-        float glow_canvas_scale_factor = enemy_effect_params_fs.z; 
-        float star_base_render_radius = 0.45; 
-        float effective_sdf_outer_radius = star_base_render_radius / max(1.0, glow_canvas_scale_factor);
-        float star_dist = sdf_star(uv_centered * enemy_visual_scale_on_quad, 5, 0.4, effective_sdf_outer_radius);
-        float star_aa = 0.025; 
-        float star_alpha_for_core = smoothstep(star_aa, 0.0, star_dist);
-        float glow_spread = 0.18; 
-        float glow_intensity_factor = 0.85; 
-        float glow_alpha_calc = smoothstep(star_aa + glow_spread, star_aa, star_dist) * glow_intensity_factor;
-        vec3 color_yellow = vec3(1.0, 1.0, 0.0);
-        vec3 color_red = vec3(1.0, 0.0, 0.0);
-        float transition = 0.5 + 0.5 * sin(tick * 0.8); 
-        vec3 slowboy_color_animated = mix(color_yellow, color_red, transition);
-        vec3 slowboy_color = slowboy_color_animated; 
-        bool is_winding_up = (enemy_effect_params_fs.y == 1.0);
-        if (is_winding_up) {
-            float total_windup_duration = enemy_effect_params_fs.w;
-            float current_windup_timer = enemy_effect_params_fs.z; // This is attack_windup_timer from Odin
-            float windup_progress = clamp((total_windup_duration - current_windup_timer) / max(0.001,total_windup_duration), 0.0, 1.0);
-            vec3 color_white = vec3(1.0, 1.0, 1.0);
-            slowboy_color = mix(slowboy_color_animated, color_white, windup_progress);
-        }
-        vec3 final_combined_rgb = slowboy_color * star_alpha_for_core + slowboy_color * glow_alpha_calc;
-        float final_combined_alpha_shape = clamp(star_alpha_for_core + glow_alpha_calc, 0.0, 1.0);
-        float current_final_alpha = final_combined_alpha_shape * enemy_color_out_fs.a;
-        float is_dying_effect = enemy_effect_params_fs.x;
-        if (is_dying_effect > 0.5) {
-            float overall_dying_alpha_mult = enemy_effect_params_fs.w; 
-            current_final_alpha *= overall_dying_alpha_mult;
-        }
-        frag_color = vec4(final_combined_rgb, current_final_alpha);
-        if (frag_color.a < 0.01) { discard; }
-        return; 
-    }
-    // --- Grunt Rendering Path (existing logic) ---
-    else { 
-        float aa_sdf_space; 
-        float is_dying = enemy_effect_params_fs.x;
-        float death_offset_world_units = enemy_effect_params_fs.y;
-        float current_part_scale_multiplier = enemy_effect_params_fs.z;
-        float overall_dying_alpha_multiplier = enemy_effect_params_fs.w;
-        vec2 rectangle_half_dims_uv = vec2(0.32, 0.12); 
-        
-        // enemy_visual_scale_fs_out is current_size * 3.0
-        // part_effective_world_width_at_full_uv represents world width of one rectangle part if it filled the scaled quad.
-        // This calculation seems a bit off. Let's simplify.
-        // rectangle_half_dims_uv is in uv_centered * enemy_visual_scale_on_quad space (p_scaled_uv space, extent -1.5 to 1.5)
-        // World size of 1 unit in p_scaled_uv space = (enemy_visual_scale_fs_out / 3.0) / (2.0 * 1.5) = enemy_visual_scale_fs_out / 9.0
-        // No, world size of 1 unit in p_scaled_uv = (current_size_of_enemy / 1.5) if current_size_of_enemy is diameter of p_scaled_uv space.
-        // World width of rectangle part = rectangle_half_dims_uv.x * 2.0 * ( (enemy_visual_scale_fs_out / 3.0) / 1.5 )
-        //                               = rectangle_half_dims_uv.x * 2.0 * (enemy_visual_scale_fs_out / 4.5)
-        float world_size_of_one_p_scaled_uv_unit = (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad) / 2.0 / (enemy_visual_scale_on_quad / 2.0) ; // This is tricky.
-                                                // (world_diameter_of_quad / p_scaled_uv_diameter)
-                                                // world_diameter_of_quad = (enemy_visual_scale_fs_out / 3.0) * 2.0 if quad_pos_in is -0.5 to 0.5
-                                                // No, final_size_for_quad in VS is instance_visual_scale_vs_in = current_size * 3.0.
-                                                // So the quad being rasterized has world diameter = current_size * 3.0.
-                                                // p_scaled_uv space has diameter 3.0.
-                                                // So 1 unit in p_scaled_uv = (current_size*3.0) / 3.0 = current_size.
-        float world_units_per_p_scaled_uv_unit = (enemy_visual_scale_fs_out / enemy_visual_scale_on_quad);
+        // ---------- Orb body (chrome, with rolling treads) ----------
+        float orb_aa     = max(orb_r * 0.06, 0.001);
+        float orb_alpha  = smoothstep(orb_aa, -orb_aa, dist_p - orb_r);
+        float ndist      = clamp(dist_p / max(orb_r, 0.0001), 0.0, 1.0);
+        float foreshort  = sqrt(max(0.0, 1.0 - ndist * ndist));
 
+        // Rotate uv into surface space so the bands move with the rolling motion.
+        float cr = cos(roll_angle); float sr = sin(roll_angle);
+        vec2 surf = vec2(cr * p.x + sr * p.y, -sr * p.x + cr * p.y);
+        float band_freq = 14.0 / max(orb_r, 0.0001);
+        float band      = 0.5 + 0.5 * sin(surf.x * band_freq);
+        float tread     = smoothstep(0.5, 0.85, band) * foreshort;
 
-        if (is_dying > 0.5) {
-            rectangle_half_dims_uv *= current_part_scale_multiplier; 
-        }
-        
-        // aa_world is desired AA edge in world units. Convert to p_scaled_uv units.
-        float aa_p_scaled_uv = world_size_of_one_p_scaled_uv_unit / world_units_per_p_scaled_uv_unit;
-        aa_sdf_space = min(rectangle_half_dims_uv.x, rectangle_half_dims_uv.y) * 0.01; 
-       // aa_sdf_space = max(aa_sdf_space, aa_p_scaled_uv); // Ensure aa isn't too small
-
-
-        float death_offset_p_scaled_uv = 0.0;
-        if (world_units_per_p_scaled_uv_unit > 0.01) { 
-            death_offset_p_scaled_uv = death_offset_world_units / world_units_per_p_scaled_uv_unit;
-        }
-
-        float internal_yaw_speed = 1.2;
-        vec2 base_uv1_for_grunt = uv_centered * enemy_visual_scale_on_quad; // Now p_scaled_uv
-        vec2 uv1_transformed = base_uv1_for_grunt;
-        if (is_dying > 0.5) { uv1_transformed.y -= death_offset_p_scaled_uv * 0.5; } // Use p_scaled_uv offset
-        float internal_rotation1 = (PI / 4.0) + tick * internal_yaw_speed;
-        vec2 uv1_rotated = rotate2d(internal_rotation1) * uv1_transformed;
-        float dist1 = sdf_rectangle(uv1_rotated, rectangle_half_dims_uv);
-        vec3 color1_tip = enemy_color_out_fs.rgb * 1.6 + vec3(0.3, 0.2, 0.3);
-        vec3 gradient_color1 = mix(color1_tip, enemy_color_out_fs.rgb, smoothstep(-0.5, 0.5, uv1_rotated.y * (1.0/max(0.01,rectangle_half_dims_uv.y)) * 0.5 )); // Normalize gradient factor
-        float alpha_sdf1 = smoothstep(aa_sdf_space, 0.0, dist1); 
-
-        vec2 base_uv2_for_grunt = uv_centered * enemy_visual_scale_on_quad; // Now p_scaled_uv
-        vec2 uv2_transformed = base_uv2_for_grunt;
-        if (is_dying > 0.5) { uv2_transformed.y += death_offset_p_scaled_uv * 0.5; } // Use p_scaled_uv offset
-        float internal_rotation2 = (-PI / 4.0) - tick * internal_yaw_speed;
-        vec2 uv2_rotated = rotate2d(internal_rotation2) * uv2_transformed;
-        float dist2 = sdf_rectangle(uv2_rotated, rectangle_half_dims_uv);
-        vec3 color2_tip = enemy_color_out_fs.rgb * 0.7 - vec3(0.1, 0.0, 0.1);
-        vec3 gradient_color2 = mix(color2_tip, enemy_color_out_fs.rgb, smoothstep(-0.5, 0.5, uv2_rotated.x * (1.0/max(0.01,rectangle_half_dims_uv.x)) * 0.5)); // Normalize gradient factor
-        float alpha_sdf2 = smoothstep(aa_sdf_space, 0.0, dist2); 
-
-        float base_alpha = enemy_color_out_fs.a;
-        if (is_dying > 0.5) { base_alpha *= overall_dying_alpha_multiplier; }
-        vec4 frag1_color = vec4(gradient_color1, alpha_sdf1 * base_alpha);
-        vec4 frag2_color = vec4(gradient_color2, alpha_sdf2 * base_alpha);
-        vec3 blended_rgb;
-        float blended_alpha;
-        if (is_dying > 0.5) {
-            blended_rgb = frag1_color.rgb * frag1_color.a + frag2_color.rgb * frag2_color.a;
-            blended_alpha = max(frag1_color.a, frag2_color.a);
+        // Chrome shading
+        vec2 light_dir = vec2(-0.55, 0.7);
+        float lit      = clamp(0.55 + 0.55 * dot(p / max(orb_r, 0.0001), light_dir), 0.0, 1.0);
+        vec3 base_chrome  = mix(vec3(0.45, 0.5, 0.62), vec3(0.95, 0.96, 1.0), lit);
+        // Phase 1 keeps a cool tint; phase 2 ramps progressively hotter as HP drops.
+        vec3 phase_tint;
+        if (boss_phase > 1.5) {
+            // Mid-phase-2 → orange, late phase 2 → blistering red.
+            phase_tint = mix(vec3(1.20, 0.65, 0.55), vec3(1.40, 0.30, 0.30), chaos);
         } else {
-            blended_rgb = frag2_color.rgb * frag2_color.a + frag1_color.rgb * frag1_color.a * (1.0 - frag2_color.a);
-            blended_alpha = frag2_color.a + frag1_color.a * (1.0 - frag2_color.a);
+            phase_tint = vec3(1.0);
         }
-        frag_color = vec4(blended_rgb, blended_alpha);
+        vec3 orb_rgb      = base_chrome * phase_tint;
+        orb_rgb           = mix(orb_rgb, orb_rgb * 0.30, tread * 0.75);
+
+        vec2 spec_centre  = vec2(-orb_r * 0.40, orb_r * 0.45);
+        float spec_d      = length(p - spec_centre);
+        float spec        = smoothstep(orb_r * 0.30, 0.0, spec_d);
+        orb_rgb          += vec3(1.0) * spec * 0.55;
+
+        // Forward-facing eye aligned with the primary aim direction
+        vec2 aim_primary  = vec2(cos(aim_angle), sin(aim_angle));
+        vec2 eye_centre   = aim_primary * (orb_r * 0.55);
+        float eye_d       = length(p - eye_centre);
+        float eye_r       = orb_r * 0.28;
+        float eye_alpha   = smoothstep(eye_r + orb_aa, eye_r - orb_aa, eye_d);
+        float eye_inner   = smoothstep(eye_r * 0.4, 0.0, eye_d);
+        vec3 eye_rgb      = mix(vec3(0.04, 0.0, 0.06), vec3(1.0, 0.35, 0.45), eye_inner);
+        // Eye flicker scales with chaos in phase 2.
+        float eye_flicker = 0.6 + 0.4 * sin(tick * (12.0 + 16.0 * chaos));
+        eye_rgb          += vec3(1.0, 0.85, 0.3) * eye_inner * eye_flicker;
+        orb_rgb           = mix(orb_rgb, eye_rgb, eye_alpha);
+
+        // Rim glow
+        float rim         = smoothstep(orb_r, orb_r - orb_r * 0.18, dist_p) - smoothstep(orb_r - orb_r * 0.18, orb_r - orb_r * 0.32, dist_p);
+        rim               = clamp(rim, 0.0, 1.0);
+        vec3 rim_col      = (boss_phase > 1.5) ? vec3(1.0, 0.35, 0.45) : vec3(0.55, 0.85, 1.0);
+        orb_rgb          += rim_col * rim * (0.6 + 0.6 * chaos);
+
+        // Aura — bigger and pulsier in phase 2 as HP drops.
+        float aura_outer = orb_r * ((boss_phase > 1.5) ? (1.7 + 0.6 * chaos) : 1.35);
+        float aura       = smoothstep(aura_outer, orb_r, dist_p) * 0.55;
+        float aura_rate  = 5.0 + 12.0 * chaos;
+        float aura_pulse = (boss_phase > 1.5) ? (0.55 + 0.45 * sin(tick * aura_rate)) : 1.0;
+        vec3 aura_col    = (boss_phase > 1.5) ? vec3(1.0, 0.4, 0.45) : vec3(0.55, 0.85, 1.0);
+        vec3 aura_rgb    = aura_col * aura * aura_pulse;
+
+        // Phase-2 sparks: short bright lines around the orb that flicker with chaos.
+        float spark_rgb_mix = 0.0;
+        if (boss_phase > 1.5 && chaos > 0.05 && dist_p > orb_r && dist_p < orb_r * 2.2) {
+            float spark_angle  = atan(p.y, p.x);
+            float n_sparks     = 6.0 + 6.0 * chaos;
+            float spark_phase  = sin(spark_angle * n_sparks + tick * 6.0);
+            float spark_radial = smoothstep(orb_r * 1.3, orb_r * 1.0, dist_p) * smoothstep(orb_r * 1.3, orb_r * 2.2, dist_p);
+            float spark_lit    = smoothstep(0.7, 0.99, spark_phase) * spark_radial * chaos;
+            spark_rgb_mix      = spark_lit;
+        }
+        vec3 spark_rgb = vec3(1.0, 0.7, 0.4) * spark_rgb_mix * 1.4;
+
+        // Composite: aura+sparks behind, beam in middle, orb on top.
+        vec3 total_rgb    = aura_rgb + spark_rgb + laser_rgb;
+        float total_alpha = max(max(aura * 0.5, spark_rgb_mix * 0.7), laser_alpha);
+        total_rgb         = mix(total_rgb, orb_rgb, orb_alpha);
+        total_alpha       = max(total_alpha, orb_alpha);
+
+        total_alpha      *= dying_alpha;
+        frag_color = vec4(clamp(total_rgb, 0.0, 1.9), clamp(total_alpha, 0.0, 1.0));
+        if (frag_color.a < 0.01) { discard; }
+        return;
+    }
+    // --- SLOWBOY (type 1) — state-machine star ---
+    else if (v_enemy_type_fs > 0.5 && v_enemy_type_fs < 1.5) {
+        // effect_params (alive): x=0, y=ai_state(0..3), z=progress(0..1), w=ENEMY_SLOWBOY_GLOW_CANVAS_SF
+        // effect_params (dying): x=1, y=death_off, z=part_scale, w=dying_alpha
+        float is_dying    = enemy_effect_params_fs.x;
+        int   state       = int(enemy_effect_params_fs.y + 0.5);
+        float progress    = clamp(enemy_effect_params_fs.z, 0.0, 1.0);
+        float dying_alpha = (is_dying > 0.5) ? enemy_effect_params_fs.w : 1.0;
+
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        // Charge-state motion blur — stretch the body along motion direction.
+        if (is_dying < 0.5 && state == 2) {
+            // Use rotation as motion direction (slowboy.rotation tracks aim during charge spin).
+            float ang = v_enemy_main_rotation_fs;
+            vec2 motion = vec2(cos(ang), sin(ang));
+            // Project p, compress perpendicular to motion (squashes orthogonal axis = "stretch" along motion)
+            float along = dot(p, motion);
+            vec2  perp  = vec2(-motion.y, motion.x);
+            float across = dot(p, perp);
+            // Compress across to fake a motion-blur stretch
+            p = motion * along + perp * across * 0.45;
+        }
+
+        float star_dist = sdf_star(p, 5, 0.4, 0.45);
+        float star_aa   = 0.025;
+        float star_core = smoothstep(star_aa, 0.0, star_dist);
+        float glow_alpha = smoothstep(star_aa + 0.18, star_aa, star_dist) * 0.85;
+
+        vec3 col_yellow = vec3(1.0, 1.0, 0.0);
+        vec3 col_red    = vec3(1.0, 0.0, 0.0);
+        vec3 anim       = mix(col_yellow, col_red, 0.5 + 0.5 * sin(tick * 0.8));
+        vec3 body_color = anim;
+
+        // State-specific tinting + extras.
+        if (is_dying < 0.5) {
+            if (state == 1) {
+                // WINDUP: shifts toward white; lightning flickers between star points.
+                body_color = mix(anim, vec3(1.0), progress);
+            } else if (state == 2) {
+                // CHARGE: pure white-hot core
+                body_color = vec3(1.0, 0.95, 0.85);
+            } else if (state == 3) {
+                // RECOVER: dim
+                body_color *= mix(0.45, 0.85, progress);
+            }
+        }
+
+        vec3 rgb = body_color * (star_core + glow_alpha);
+        float alpha = clamp(star_core + glow_alpha, 0.0, 1.0) * enemy_color_out_fs.a;
+        if (is_dying > 0.5) { alpha *= dying_alpha; }
+        frag_color = vec4(rgb, alpha);
+        if (frag_color.a < 0.01) { discard; }
+        return;
+    }
+
+    // --- SPLITTER (type 3) — orange asteroid hex ---
+    else if (v_enemy_type_fs > 2.5 && v_enemy_type_fs < 3.5) {
+        float is_dying    = enemy_effect_params_fs.x;
+        float dying_alpha = (is_dying > 0.5) ? enemy_effect_params_fs.w : 1.0;
+
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        float r = length(p);
+        // Hexagonal-ish silhouette: clamp polar radius via a 6-arm modulator
+        float ang = atan(p.y, p.x);
+        float hex_modulator = 0.92 + 0.08 * cos(6.0 * ang);   // 0.84..1.0
+        float silhouette_r = 0.42 * hex_modulator;
+        float aa = 0.02;
+        float body_alpha = smoothstep(aa, -aa, r - silhouette_r);
+
+        // Cracks: dark stripes via low-frequency sin lattice rotated by the rocky tumble.
+        float crack_a = sin(p.x * 18.0 + p.y * 7.0);
+        float crack_b = sin(p.x * 5.0 - p.y * 14.0 + 1.7);
+        float cracks = smoothstep(0.7, 0.95, max(crack_a, crack_b)) * 0.6;
+        // Highlights — spherical shading from upper-left
+        float lit = clamp(0.5 + 0.5 * dot(normalize(p + vec2(0.001)), vec2(-0.7, 0.6)), 0.0, 1.0);
+
+        vec3 base   = enemy_color_out_fs.rgb * (0.55 + 0.6 * lit);
+        vec3 shadow = base * 0.35;
+        vec3 col    = mix(base, shadow, cracks);
+        // Subtle inner dark core for depth
+        col *= mix(1.0, 0.8, smoothstep(silhouette_r * 0.0, silhouette_r * 0.7, r));
+
+        float alpha = body_alpha * enemy_color_out_fs.a;
+        if (is_dying > 0.5) { alpha *= dying_alpha; }
+        frag_color = vec4(col, alpha);
+        if (frag_color.a < 0.01) { discard; }
+        return;
+    }
+
+    // --- SNIPER (type 4) — sentinel + telegraph beam ---
+    else if (v_enemy_type_fs > 3.5 && v_enemy_type_fs < 4.5) {
+        // effect_params (alive): x=0, y=ai_state(0=IDLE,1=AIM,2=FIRE,3=COOL), z=progress, w=1
+        // effect_params (dying): x=1, y=death_off, z=part_scale, w=dying_alpha
+        float is_dying    = enemy_effect_params_fs.x;
+        int   state       = int(enemy_effect_params_fs.y + 0.5);
+        float progress    = clamp(enemy_effect_params_fs.z, 0.0, 1.0);
+        float dying_alpha = (is_dying > 0.5) ? enemy_effect_params_fs.w : 1.0;
+
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        // World-to-p_scaled conversion (sniper has its own quad size).
+        float w2u = (enemy_visual_scale_fs_out > 0.001) ? (enemy_visual_scale_on_quad / enemy_visual_scale_fs_out) : 1.0;
+
+        const float SNIPER_BODY_R_W   = 0.10;
+        const float SNIPER_BEAM_LEN_W = 9.2;   // matches ENEMY_SNIPER_BEAM_LENGTH world units (~ARENA_RADIUS * 3.6)
+        const float SNIPER_BEAM_HALF_W = 0.05;
+
+        float body_r  = SNIPER_BODY_R_W * w2u;
+        float beam_len = SNIPER_BEAM_LEN_W * w2u;
+        float beam_hw = SNIPER_BEAM_HALF_W * w2u;
+
+        vec2 aim  = vec2(cos(v_enemy_main_rotation_fs), sin(v_enemy_main_rotation_fs));
+        vec2 perp = vec2(-aim.y, aim.x);
+
+        // Body — angular triangular sentinel pointing along aim, with a glowing eye core.
+        // Scalene triangle: tip in aim direction, base behind.
+        float along  = dot(p, aim);
+        float across = dot(p, perp);
+        // Body extents: along [-body_r, body_r * 1.4], across [-body_r * 0.85, body_r * 0.85] tapering to 0 at tip.
+        float t = (along + body_r) / (body_r * 2.4); // 0 at base, 1 at tip
+        float body_alpha = 0.0;
+        if (t >= 0.0 && t <= 1.0) {
+            float taper = mix(1.0, 0.05, t);
+            float side  = abs(across) - body_r * 0.85 * taper;
+            body_alpha = smoothstep(0.005 * w2u, -0.005 * w2u, side);
+        }
+
+        // Eye/scope — circular glowing dot near the rear of the body
+        vec2 eye_centre = -aim * (body_r * 0.30);
+        float eye_d = length(p - eye_centre);
+        float eye_r = body_r * 0.32;
+        float eye_alpha = smoothstep(eye_r + 0.005 * w2u, eye_r - 0.005 * w2u, eye_d);
+        float eye_inner = smoothstep(eye_r * 0.55, 0.0, eye_d);
+
+        // Eye colour reacts to state: dim red idle, bright pulsing red while aiming, white-hot on fire.
+        vec3 eye_col = vec3(0.6, 0.0, 0.0);
+        if (is_dying < 0.5) {
+            if (state == 0) {
+                eye_col = vec3(0.3, 0.0, 0.0);
+            } else if (state == 1) {
+                float pulse = 0.6 + 0.4 * sin(tick * (12.0 + 20.0 * progress));
+                eye_col = mix(vec3(0.4, 0.05, 0.05), vec3(1.0, 0.45, 0.45), progress) * pulse;
+            } else if (state == 2) {
+                eye_col = mix(vec3(1.0, 1.0, 0.85), vec3(1.0, 0.4, 0.4), progress);
+            } else {
+                eye_col = vec3(0.25, 0.05, 0.05);
+            }
+        }
+
+        vec3 body_col = mix(enemy_color_out_fs.rgb * 0.7, enemy_color_out_fs.rgb * 1.3, smoothstep(-1.0, 1.0, dot(normalize(p + vec2(0.001)), vec2(-0.7, 0.6))));
+        body_col = mix(body_col, eye_col + vec3(0.4) * eye_inner, eye_alpha);
+
+        // Telegraph beam — only visible during AIMING/FIRING.
+        float beam_alpha = 0.0;
+        vec3  beam_rgb = vec3(0.0);
+        if (is_dying < 0.5 && state >= 1 && state <= 2) {
+            // Capsule SDF starting at the body tip, extending along aim.
+            vec2 origin = aim * (body_r * 1.2);
+            vec2 rel = p - origin;
+            float along_b = dot(rel, aim);
+            float across_b = dot(rel, perp);
+            float capsule_sdf;
+            if (along_b < 0.0) capsule_sdf = length(rel) - beam_hw;
+            else if (along_b > beam_len) capsule_sdf = length(rel - aim * beam_len) - beam_hw;
+            else capsule_sdf = abs(across_b) - beam_hw;
+
+            float aa = beam_hw * 0.5;
+            float core = smoothstep(aa, -aa, capsule_sdf);
+            float halo = smoothstep(beam_hw * 4.0, 0.0, max(0.0, capsule_sdf));
+
+            if (state == 1) {
+                // AIMING: thin sweet line, gets brighter as lock-on completes.
+                float intensity = mix(0.15, 0.85, progress);
+                // After lock-on, no more tracking — flicker
+                if (progress > 0.78) {
+                    intensity *= 0.85 + 0.15 * sin(tick * 30.0);
+                }
+                beam_rgb   = vec3(1.0, 0.25, 0.25) * intensity;
+                beam_alpha = (core * 0.85 + halo * 0.4) * intensity;
+            } else {
+                // FIRING: blistering flash that dims through the firing window.
+                float k = 1.6 * (1.0 - progress);
+                beam_rgb   = (vec3(1.0, 0.95, 0.85) * core + vec3(1.0, 0.4, 0.4) * halo) * k;
+                beam_alpha = clamp(core + halo * 0.6, 0.0, 1.0) * k;
+            }
+        }
+
+        // Composite
+        vec3 total = body_col * body_alpha + beam_rgb;
+        float total_alpha = max(body_alpha, beam_alpha) * enemy_color_out_fs.a;
+        if (is_dying > 0.5) { total_alpha *= dying_alpha; }
+        frag_color = vec4(clamp(total, 0.0, 1.6), clamp(total_alpha, 0.0, 1.0));
+        if (frag_color.a < 0.01) { discard; }
+        return;
+    }
+
+    // --- DISRUPTOR (type 5) — fast cyan triangle pointed at the button ---
+    else if (v_enemy_type_fs > 4.5 && v_enemy_type_fs < 5.5) {
+        float is_dying    = enemy_effect_params_fs.x;
+        float dying_alpha = (is_dying > 0.5) ? enemy_effect_params_fs.w : 1.0;
+
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        // Triangle pointing in the +x direction in p_scaled space (rotation handled by quad rot in VS).
+        // Tip at (0.6, 0), base at x=-0.4.
+        float along  = p.x;
+        float across = p.y;
+        float t = (along + 0.4) / 1.0; // 0 at base, 1 at tip
+        float body_alpha = 0.0;
+        if (t >= 0.0 && t <= 1.0) {
+            float taper = mix(1.0, 0.05, t);
+            float side  = abs(across) - 0.30 * taper;
+            body_alpha = smoothstep(0.012, -0.012, side);
+        }
+
+        // Hostile inner glow (pulses)
+        float pulse = 0.65 + 0.35 * sin(tick * 8.0);
+        vec3 base = enemy_color_out_fs.rgb;
+        vec3 col  = mix(base * 0.5, base * 1.4, smoothstep(-0.4, 0.6, p.x));
+        col += vec3(0.5, 1.0, 1.0) * pulse * body_alpha * 0.4;
+
+        // Trailing tether-streak behind the base (dark cyan strands)
+        float trail = 0.0;
+        if (p.x < -0.4 && p.x > -1.0) {
+            float trail_t = (-0.4 - p.x) / 0.6;
+            float trail_w = 0.18 * (1.0 - trail_t);
+            trail = smoothstep(trail_w + 0.03, 0.0, abs(across)) * (1.0 - trail_t) * 0.4;
+            trail *= 0.5 + 0.5 * sin(tick * 18.0 + p.x * 28.0);
+        }
+
+        vec3 total = col * body_alpha + base * trail;
+        float total_alpha = max(body_alpha, trail) * enemy_color_out_fs.a;
+        if (is_dying > 0.5) { total_alpha *= dying_alpha; }
+        frag_color = vec4(total, total_alpha);
+        if (frag_color.a < 0.01) { discard; }
+        return;
+    }
+
+    // --- GRUNT (type 0) — spinning triangular shard ---
+    // effect_params (alive): x=0, y=speed_norm[0..1], z=1, w=1
+    // effect_params (dying): x=1, y=death_off,        z=part_scale, w=dying_alpha
+    else {
+        float is_dying    = enemy_effect_params_fs.x;
+        float part_scale  = enemy_effect_params_fs.z;
+        float dying_alpha = (is_dying > 0.5) ? enemy_effect_params_fs.w : 1.0;
+        float speed_norm  = (is_dying > 0.5) ? 0.0 : enemy_effect_params_fs.y;
+        float pulse       = 0.5 + 0.5 * sin(tick * 9.0);                // 0..1 oscillator
+        float pulse_mod   = mix(1.0, 1.0 + 0.10 * pulse, speed_norm);   // body squash with speed
+
+        // p is already rotated by the quad rotation (vs_enemy applies it to non-boss/non-sniper).
+        vec2 p = uv_centered * enemy_visual_scale_on_quad;
+        // Equilateral triangle SDF, pointing +y.
+        // Use folded coords: take abs(x), rotate to lift onto a "side".
+        float k = sqrt(3.0);
+        float scale = 0.5 * (is_dying > 0.5 ? part_scale : pulse_mod);
+        vec2 q = p / max(scale, 0.0001);
+        q.x = abs(q.x) - 1.0;
+        q.y = q.y + 1.0 / k;
+        if (q.x + k * q.y > 0.0) { q = vec2(q.x - k * q.y, -k * q.x - q.y) / 2.0; }
+        q.x -= clamp(q.x, -2.0, 0.0);
+        float tri_sdf = -length(q) * sign(q.y) * scale;
+
+        float aa = 0.025;
+        float body = smoothstep(aa, -aa, tri_sdf);
+        // Halo thickens with speed so chasing grunts drag a hot wake.
+        float halo_thickness = 0.12 + 0.08 * speed_norm;
+        float halo = smoothstep(aa + halo_thickness, aa, tri_sdf) * (0.55 + 0.30 * speed_norm * pulse);
+
+        // Hot core toward center, darker rim near edges. Speed brightens the core.
+        float r = length(p);
+        vec3 hot  = enemy_color_out_fs.rgb * (1.7 + 0.6 * speed_norm) + vec3(0.25, 0.0, 0.25);
+        vec3 rim  = enemy_color_out_fs.rgb * 0.7;
+        vec3 col  = mix(hot, rim, smoothstep(0.0, 0.5, r));
+
+        // Inner spin ring; brightness pulses with motion.
+        float ring = smoothstep(0.18, 0.16, r) - smoothstep(0.16, 0.13, r);
+        col += vec3(1.0, 0.6, 0.95) * ring * (0.6 + 0.8 * speed_norm * pulse);
+
+        vec3 total = col * body + col * halo;
+        float total_alpha = clamp(body + halo * 0.65, 0.0, 1.0) * enemy_color_out_fs.a;
+        if (is_dying > 0.5) { total_alpha *= dying_alpha; }
+        frag_color = vec4(total, total_alpha);
         if (frag_color.a < 0.01) { discard; }
     }
 }
