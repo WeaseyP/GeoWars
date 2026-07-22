@@ -218,12 +218,25 @@ frame :: proc "c" () {
             0.0,
         }
     }
+    // RMB beam uniform: pack origin + dir into one vec4 and fade/length/width into another.
+    // When the timer is 0 we explicitly zero out the dir so the shader's length-test bails out.
+    beam_dir_vec: m.vec2 = {0, 0}
+    beam_fade: f32 = 0.0
+    if shared.state.rmb_beam_timer > 0.0 && shared.state.rmb_beam_total > 0.0 {
+        beam_dir_vec = shared.state.rmb_beam_dir
+        beam_fade    = shared.state.rmb_beam_timer / shared.state.rmb_beam_total
+    }
     shared.state.bg_fs_params={
         tick=current_time_f, resolution={width_f,height_f}, bg_option=1,
         player_hp_ratio=hp_ratio, camera_pos=shared.state.camera_pos,
         wave_button_state=button_state,
         shop_state={shop_active, shop_hover, shop_pre_boss, 0.0},
         shop_tiers=shop_tier_vec,
+        rmb_beam_origin_dir={
+            shared.state.rmb_beam_origin.x, shared.state.rmb_beam_origin.y,
+            beam_dir_vec.x, beam_dir_vec.y,
+        },
+        rmb_beam_params={beam_fade, shared.RMB_BEAM_LENGTH, shared.RMB_BEAM_HALF_WIDTH, 0.0},
     }
     shared.state.player_fs_params={
         tick=current_time_f, resolution={width_f,height_f}, player_hp_uniform=f32(shared.state.player_hp),
@@ -234,6 +247,9 @@ frame :: proc "c" () {
         rmb_fire_flash = shared.state.rmb_fire_flash,
         rmb_charge_ratio = shared.state.rmb_charge / shared.RMB_BEAM_THRESHOLD,
         rmb_max_charge_ratio = shared.state.eff_rmb_max_charge / shared.RMB_BEAM_THRESHOLD,
+        dash_flash = shared.state.dash_flash,
+        dash_direction = shared.state.dash_direction,
+        echo_alpha = 1.0,
     }
     shared.state.particle_fs_params={tick=current_time_f}
     shared.state.enemy_fs_params={tick=current_time_f}
@@ -269,7 +285,37 @@ frame :: proc "c" () {
     // Background pass also renders the arena ring + outside-arena darkening + shop card overlay (see fs_bg in shader.glsl).
     sg.apply_pipeline(shared.state.bg_pip); sg.apply_bindings(shared.state.bind); sg.apply_uniforms(shared.UB_bg_fs_params, sg.Range{ptr=&shared.state.bg_fs_params, size=size_of(shared.Bg_Fs_Params)}); sg.draw(0,4,1)
 
-    sg.apply_pipeline(shared.state.player_pip); sg.apply_bindings(shared.state.bind); sg.apply_uniforms(shared.UB_Player_Vs_Params, sg.Range{ptr=&shared.state.player_vs_params, size=size_of(shared.Player_Vs_Params)}); sg.apply_uniforms(shared.UB_Player_Fs_Params, sg.Range{ptr=&shared.state.player_fs_params, size=size_of(shared.Player_Fs_Params)}); sg.draw(0,4,1)
+    sg.apply_pipeline(shared.state.player_pip); sg.apply_bindings(shared.state.bind)
+    // Dash afterimages: replay the player draw at each stored trail position with echo_alpha
+    // < 1.0 so the FS dims and tints them cyan. Newest entry is the strongest. We stash and
+    // restore the live mvp + fs params around the loop so the final live draw is unaffected.
+    if shared.state.dash_flash > 0.001 && shared.state.player_dash_trail_count > 0 {
+        live_mvp     := shared.state.player_vs_params.mvp
+        live_fs_copy := shared.state.player_fs_params
+        echo_count   := shared.state.player_dash_trail_count
+        for i := echo_count - 1; i >= 0; i -= 1 {
+            // Older entries are dimmer; whole trail also fades with dash_flash.
+            age_t := f32(i) / f32(max(echo_count, 1))
+            echo_a := (1.0 - age_t) * shared.state.dash_flash * 0.55
+            if echo_a < 0.01 { continue }
+
+            ghost_pos := shared.state.player_dash_traiL_pos[i]
+            ghost_translate := m.translate(m.vec3{ghost_pos.x, ghost_pos.y, 0.0})
+            ghost_model     := m.mul(ghost_translate, scale_mat_f)
+            shared.state.player_vs_params.mvp = m.mul(view_proj_f, ghost_model)
+            shared.state.player_fs_params.echo_alpha = echo_a
+
+            sg.apply_uniforms(shared.UB_Player_Vs_Params, sg.Range{ptr=&shared.state.player_vs_params, size=size_of(shared.Player_Vs_Params)})
+            sg.apply_uniforms(shared.UB_Player_Fs_Params, sg.Range{ptr=&shared.state.player_fs_params, size=size_of(shared.Player_Fs_Params)})
+            sg.draw(0, 4, 1)
+        }
+        // Restore the live draw's matrices/uniforms.
+        shared.state.player_vs_params.mvp = live_mvp
+        shared.state.player_fs_params     = live_fs_copy
+    }
+    sg.apply_uniforms(shared.UB_Player_Vs_Params, sg.Range{ptr=&shared.state.player_vs_params, size=size_of(shared.Player_Vs_Params)})
+    sg.apply_uniforms(shared.UB_Player_Fs_Params, sg.Range{ptr=&shared.state.player_fs_params, size=size_of(shared.Player_Fs_Params)})
+    sg.draw(0,4,1)
 
     if shared.state.num_active_particles > 0 {
         sg.apply_pipeline(shared.state.particle_pip); sg.apply_bindings(shared.state.particle_bind); sg.update_buffer(shared.state.particle_instance_vbo, sg.Range{ptr=rawptr(&shared.state.particle_instance_data[0]), size=uint(shared.state.num_active_particles)*size_of(shared.Particle_Instance_Data)})

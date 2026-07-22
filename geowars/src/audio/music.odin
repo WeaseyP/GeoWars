@@ -3,8 +3,8 @@ package audio
 import ma "../vendor/miniaudio"
 import "core:math"
 import "core:fmt"
-import rand "core:math/rand"
 import shared "../shared"
+import boss_trial "../../.."
 
 
 // --- Per-enemy music tracks + boss track ---
@@ -23,6 +23,14 @@ disruptor_track_pcm: []f32
 disruptor_track_buf: ma.audio_buffer
 boss_track_pcm:      []f32
 boss_track_buf:      ma.audio_buffer
+boss_intensity_track_pcm: []f32
+boss_intensity_track_buf: ma.audio_buffer
+boss_sax_track_pcm:  []f32
+boss_sax_track_buf:  ma.audio_buffer
+boss_tuba_track_pcm: []f32
+boss_tuba_track_buf: ma.audio_buffer
+boss_hit_stinger_pcm: []f32
+boss_hit_stinger_buf: ma.audio_buffer
 
 // Active master volumes per track type. Targets jump on enemy state changes; current values lerp.
 @(private)
@@ -33,7 +41,12 @@ music_state: struct {
     target_sniper:    f32, current_sniper:    f32,
     target_disruptor: f32, current_disruptor: f32,
     target_boss:      f32, current_boss:      f32,
+    target_boss_intensity: f32, current_boss_intensity: f32,
+    target_boss_sax:  f32, current_boss_sax:  f32,
+    target_boss_tuba: f32, current_boss_tuba: f32,
     current_boss_pitch: f32, target_boss_pitch: f32,
+    boss_hp_ratio: f32,
+    boss_was_alive: bool,
     initialized: bool,
 }
 
@@ -44,6 +57,14 @@ SPLITTER_TRACK_VOL  :: 0.50
 SNIPER_TRACK_VOL    :: 0.45
 DISRUPTOR_TRACK_VOL :: 0.55
 BOSS_TRACK_VOL      :: 0.85
+
+// Boss arrangement and performance controls. The supplied Skald project is authored at 145 BPM.
+BOSS_TRACK_BPM             :: f32(145.0)
+BOSS_TRACK_LOOP_BARS       :: 8
+BOSS_TRACK_MAX_PITCH       :: f32(1.18) // ~171 BPM at zero HP
+BOSS_TRACK_PITCH_RATE      :: f32(0.035)
+BOSS_TUBA_HP_THRESHOLD     :: f32(0.25) // halfway through phase 2 (phase 2 starts at 50%)
+BOSS_HIT_STINGER_VOL       :: f32(0.20)
 
 MUSIC_FADE_RATE :: f32(2.5) // volume per second; 0.4s to fully fade in/out
 
@@ -306,7 +327,7 @@ gen_disruptor_track :: proc() {
 }
 
 @(private)
-gen_boss_track :: proc() {
+gen_legacy_boss_track :: proc() {
     // 105 BPM, 4 bars. Drums + sax-style melody. Pitch is later modulated upwards
     // via ma_sound_set_pitch as the boss takes damage, so the music intensifies.
     bpm: f32 = 105.0
@@ -355,6 +376,139 @@ gen_boss_track :: proc() {
     fmt.printf("--- Boss track generated (%d frames). ---\n", total)
 }
 
+@(private)
+configure_boss_project :: proc(p: ^boss_trial.Project_State, enraged: bool) {
+    if enraged {
+        // Open, dirty and resonant. This is the destination of the health-driven crossfade.
+        boss_trial.GW_Hat_Static_set_cutoff(p.GW_Hat_Static, 12000.0)
+        boss_trial.GW_Hat_Static_set_decay(p.GW_Hat_Static, 0.12)
+        boss_trial.GW_Grunt_Swarm_Bass_set_cutoff(p.GW_Grunt_Swarm_Bass, 1450.0)
+        boss_trial.GW_Grunt_Swarm_Bass_set_drive(p.GW_Grunt_Swarm_Bass, 18.0)
+        boss_trial.GW_Grunt_Swarm_Bass_set_mix(p.GW_Grunt_Swarm_Bass, 0.36)
+        boss_trial.GW_Grunt_Swarm_Bass_set_resonance(p.GW_Grunt_Swarm_Bass, 2.2)
+        boss_trial.GW_Grunt_Swarm_Bass_set_decay(p.GW_Grunt_Swarm_Bass, 0.19)
+        boss_trial.GW_Splitter_Echo_Stab_set_cutoff(p.GW_Splitter_Echo_Stab, 4200.0)
+        boss_trial.GW_Splitter_Echo_Stab_set_feedback(p.GW_Splitter_Echo_Stab, 0.56)
+        boss_trial.GW_Splitter_Echo_Stab_set_mix(p.GW_Splitter_Echo_Stab, 0.48)
+        boss_trial.GW_Splitter_Echo_Stab_set_pulseWidth(p.GW_Splitter_Echo_Stab, 0.38)
+        boss_trial.GW_Splitter_Echo_Stab_set_resonance(p.GW_Splitter_Echo_Stab, 2.7)
+
+        // Phase-2 sax is the same drawn voice, pushed toward breath, growl, room and vibrato.
+        boss_trial.Growly_Sax_set_Breath_amplitude(p.Growly_Sax, 0.23)
+        boss_trial.Growly_Sax_set_Expression_mix(p.Growly_Sax, 0.48)
+        boss_trial.Growly_Sax_set_Body_cutoff(p.Growly_Sax, 2200.0)
+        boss_trial.Growly_Sax_set_Formant_resonance(p.Growly_Sax, 3.4)
+        boss_trial.Growly_Sax_set_Room_mix(p.Growly_Sax, 0.27)
+        boss_trial.Growly_Sax_set_Vibrato_amplitude(p.Growly_Sax, 0.038)
+        boss_trial.Growly_Sax_set_drive(p.Growly_Sax, 25.0)
+        boss_trial.Growly_Sax_set_tone(p.Growly_Sax, 6500.0)
+    } else {
+        // Restrained phase-1 colour: short envelopes, narrow pulses and dark filters.
+        boss_trial.GW_Hat_Static_set_cutoff(p.GW_Hat_Static, 3600.0)
+        boss_trial.GW_Hat_Static_set_decay(p.GW_Hat_Static, 0.038)
+        boss_trial.GW_Grunt_Swarm_Bass_set_cutoff(p.GW_Grunt_Swarm_Bass, 520.0)
+        boss_trial.GW_Grunt_Swarm_Bass_set_drive(p.GW_Grunt_Swarm_Bass, 5.0)
+        boss_trial.GW_Grunt_Swarm_Bass_set_mix(p.GW_Grunt_Swarm_Bass, 0.08)
+        boss_trial.GW_Grunt_Swarm_Bass_set_resonance(p.GW_Grunt_Swarm_Bass, 1.0)
+        boss_trial.GW_Grunt_Swarm_Bass_set_decay(p.GW_Grunt_Swarm_Bass, 0.085)
+        boss_trial.GW_Splitter_Echo_Stab_set_cutoff(p.GW_Splitter_Echo_Stab, 900.0)
+        boss_trial.GW_Splitter_Echo_Stab_set_feedback(p.GW_Splitter_Echo_Stab, 0.17)
+        boss_trial.GW_Splitter_Echo_Stab_set_mix(p.GW_Splitter_Echo_Stab, 0.15)
+        boss_trial.GW_Splitter_Echo_Stab_set_pulseWidth(p.GW_Splitter_Echo_Stab, 0.64)
+        boss_trial.GW_Splitter_Echo_Stab_set_resonance(p.GW_Splitter_Echo_Stab, 1.25)
+    }
+}
+
+@(private)
+generate_boss_hit_stinger :: proc() {
+    // A sixth, hit-only "chrome strike" instrument: inharmonic sine/saw partials, a noise
+    // transient, fast ADSR and a falling one-pole cutoff. Gameplay pitches it by damage/HP.
+    total := int(0.52 * f32(MUSIC_SAMPLE_RATE))
+    boss_hit_stinger_pcm = make([]f32, total)
+    phase: f64 = 0.0
+    filtered: f64 = 0.0
+    sr := f64(MUSIC_SAMPLE_RATE)
+    for i in 0..<total {
+        t := f64(i) / sr
+        progress := f64(i) / f64(total)
+        freq := 245.0 * math.pow(0.48, progress)
+        phase += 2.0 * math.PI * freq / sr
+        if phase >= 2.0 * math.PI { phase -= 2.0 * math.PI }
+
+        saw := phase / math.PI - 1.0
+        metal := math.sin(phase) + 0.52 * math.sin(phase * 1.4142) +
+                 0.32 * math.sin(phase * 2.317) + 0.16 * saw
+        hash := math.sin(f64(i) * 73.731 + 19.17) * 91827.331
+        noise := (hash - math.floor(hash)) * 2.0 - 1.0
+        raw := metal + noise * math.exp(-t * 42.0) * 0.55
+
+        cutoff := 10500.0 * math.pow(720.0 / 10500.0, progress)
+        alpha := 1.0 - math.exp(-2.0 * math.PI * cutoff / sr)
+        filtered += alpha * (raw - filtered)
+
+        attack := math.min(t / 0.003, 1.0)
+        decay := math.exp(-t * 8.5)
+        release := math.min((f64(total - i) / sr) / 0.11, 1.0)
+        boss_hit_stinger_pcm[i] = f32(math.tanh(filtered * attack * decay * release * 0.8))
+    }
+}
+
+@(private)
+gen_boss_track :: proc() {
+    // Render two knob states from the supplied Skald project. The second PCM is a difference
+    // stem, so volume 0..1 performs a clean restrained->enraged morph without duplicating audio.
+    frames_per_bar := f32(MUSIC_SAMPLE_RATE) * 60.0 / BOSS_TRACK_BPM * 4.0
+    warmup_frames := int(math.round(frames_per_bar))
+    total := int(math.round(frames_per_bar * f32(BOSS_TRACK_LOOP_BARS)))
+    boss_track_pcm = make([]f32, total)
+    boss_intensity_track_pcm = make([]f32, total)
+    boss_sax_track_pcm = make([]f32, total)
+    boss_tuba_track_pcm = make([]f32, total)
+
+    calm, hot: boss_trial.Project_State
+    boss_trial.project_init(&calm, f32(MUSIC_SAMPLE_RATE))
+    boss_trial.project_init(&hot, f32(MUSIC_SAMPLE_RATE))
+    configure_boss_project(&calm, false)
+    configure_boss_project(&hot, true)
+
+    // Prime filters, envelopes and delay lines for a much cleaner loop boundary.
+    for _ in 0..<warmup_frames {
+        boss_trial.project_process(&calm)
+        boss_trial.project_process(&hot)
+    }
+
+    for i in 0..<total {
+        calm_hat, _  := boss_trial.GW_Hat_Static_process(calm.GW_Hat_Static)
+        calm_bass, _ := boss_trial.GW_Grunt_Swarm_Bass_process(calm.GW_Grunt_Swarm_Bass)
+        calm_stab, _ := boss_trial.GW_Splitter_Echo_Stab_process(calm.GW_Splitter_Echo_Stab)
+        boss_trial.Tuba_process(calm.Tuba)
+        boss_trial.Growly_Sax_process(calm.Growly_Sax)
+
+        hot_hat, _   := boss_trial.GW_Hat_Static_process(hot.GW_Hat_Static)
+        hot_bass, _  := boss_trial.GW_Grunt_Swarm_Bass_process(hot.GW_Grunt_Swarm_Bass)
+        hot_stab, _  := boss_trial.GW_Splitter_Echo_Stab_process(hot.GW_Splitter_Echo_Stab)
+        hot_tuba, _  := boss_trial.Tuba_process(hot.Tuba)
+        hot_sax, _   := boss_trial.Growly_Sax_process(hot.Growly_Sax)
+
+        calm_raw := calm_hat + calm_bass + calm_stab
+        hot_raw  := hot_hat + hot_bass + hot_stab
+        calm_mix := math.tanh(calm_raw * 0.75)
+        hot_mix  := math.tanh(hot_raw * 0.75)
+        sax_mix  := math.tanh((hot_raw + hot_sax) * 0.75)
+        full_mix := math.tanh((hot_raw + hot_sax + hot_tuba) * 0.75)
+
+        boss_track_pcm[i] = calm_mix
+        boss_intensity_track_pcm[i] = hot_mix - calm_mix
+        boss_sax_track_pcm[i] = sax_mix - hot_mix
+        boss_tuba_track_pcm[i] = full_mix - sax_mix
+    }
+    boss_trial.project_destroy(&calm)
+    boss_trial.project_destroy(&hot)
+    generate_boss_hit_stinger()
+    fmt.printf("--- Skald boss trial generated (%d bars, %d frames at %.0f BPM). ---\n",
+               BOSS_TRACK_LOOP_BARS, total, BOSS_TRACK_BPM)
+}
+
 // ============================================================================
 // Init / cleanup / update
 // ============================================================================
@@ -389,8 +543,19 @@ init_music_tracks :: proc() {
     init_music_sound(splitter_track_pcm,  &splitter_track_buf,  &shared.state.splitter_track_sound,  false, "splitter")
     init_music_sound(sniper_track_pcm,    &sniper_track_buf,    &shared.state.sniper_track_sound,    false, "sniper")
     init_music_sound(disruptor_track_pcm, &disruptor_track_buf, &shared.state.disruptor_track_sound, false, "disruptor")
-    // Boss track allows pitch shifting so we can speed it up as HP drops.
-    init_music_sound(boss_track_pcm,      &boss_track_buf,      &shared.state.boss_track_sound,      true,  "boss")
+    // Boss stems run in lock-step and receive the same slow tempo/pitch rise.
+    init_music_sound(boss_track_pcm, &boss_track_buf, &shared.state.boss_track_sound, true, "boss-base")
+    init_music_sound(boss_intensity_track_pcm, &boss_intensity_track_buf,
+                     &shared.state.boss_intensity_track_sound, true, "boss-intensity")
+    init_music_sound(boss_sax_track_pcm, &boss_sax_track_buf,
+                     &shared.state.boss_sax_track_sound, true, "boss-sax")
+    init_music_sound(boss_tuba_track_pcm, &boss_tuba_track_buf,
+                     &shared.state.boss_tuba_track_sound, true, "boss-tuba")
+    init_music_sound(boss_hit_stinger_pcm, &boss_hit_stinger_buf,
+                     &shared.state.boss_hit_stinger_sound, true, "boss-hit")
+    ma.sound_set_looping(&shared.state.boss_hit_stinger_sound, false)
+    ma.sound_stop(&shared.state.boss_hit_stinger_sound)
+    ma.sound_set_volume(&shared.state.boss_hit_stinger_sound, BOSS_HIT_STINGER_VOL)
 
     music_state.current_boss_pitch = 1.0
     music_state.target_boss_pitch  = 1.0
@@ -405,7 +570,6 @@ init_music_tracks :: proc() {
     if ma.sound_start(&shared.state.synth_track_sound) != .SUCCESS {
         fmt.eprintf("warn: synth_track_sound start (already started?)\n")
     }
-    _ = rand.float32 // keep rand import used elsewhere consistent
 }
 
 cleanup_music_tracks :: proc() {
@@ -414,14 +578,26 @@ cleanup_music_tracks :: proc() {
     ma.sound_uninit(&shared.state.sniper_track_sound)
     ma.sound_uninit(&shared.state.disruptor_track_sound)
     ma.sound_uninit(&shared.state.boss_track_sound)
+    ma.sound_uninit(&shared.state.boss_intensity_track_sound)
+    ma.sound_uninit(&shared.state.boss_sax_track_sound)
+    ma.sound_uninit(&shared.state.boss_tuba_track_sound)
+    ma.sound_uninit(&shared.state.boss_hit_stinger_sound)
     ma.audio_buffer_uninit(&splitter_track_buf)
     ma.audio_buffer_uninit(&sniper_track_buf)
     ma.audio_buffer_uninit(&disruptor_track_buf)
     ma.audio_buffer_uninit(&boss_track_buf)
+    ma.audio_buffer_uninit(&boss_intensity_track_buf)
+    ma.audio_buffer_uninit(&boss_sax_track_buf)
+    ma.audio_buffer_uninit(&boss_tuba_track_buf)
+    ma.audio_buffer_uninit(&boss_hit_stinger_buf)
     delete(splitter_track_pcm)
     delete(sniper_track_pcm)
     delete(disruptor_track_pcm)
     delete(boss_track_pcm)
+    delete(boss_intensity_track_pcm)
+    delete(boss_sax_track_pcm)
+    delete(boss_tuba_track_pcm)
+    delete(boss_hit_stinger_pcm)
 }
 
 @(private)
@@ -431,12 +607,25 @@ approach :: proc(current, target, step: f32) -> f32 {
     return current
 }
 
+// Called by collision handling only for damage dealt to the boss. The chrome transient overlays
+// the uninterrupted arrangement at a restrained level, with pitch reacting to damage and HP.
+notify_boss_hit :: proc(damage: i32, hp_ratio: f32) {
+    if !music_state.initialized { return }
+    chaos := 1.0 - math.clamp(hp_ratio, 0.0, 1.0)
+    damage_lift := math.clamp(f32(damage) * 0.018, 0.0, 0.16)
+    hit_pitch := 0.88 + chaos * 0.34 + damage_lift
+    ma.sound_set_pitch(&shared.state.boss_hit_stinger_sound, hit_pitch)
+    ma.sound_seek_to_pcm_frame(&shared.state.boss_hit_stinger_sound, 0)
+    ma.sound_start(&shared.state.boss_hit_stinger_sound)
+}
+
 update_music :: proc(dt: f32) {
     if !music_state.initialized { return }
 
     // Capture boss HP if present, and count live disruptors (the only alive-gated track).
     boss_alive := false
     boss_hp_ratio: f32 = 1.0
+    boss_phase: int = 0
     disruptor_n: int = 0
     for i in 0..<shared.MAX_ENEMIES {
         e := &shared.state.enemies[i]
@@ -444,6 +633,7 @@ update_music :: proc(dt: f32) {
         if e.type == .DISRUPTOR { disruptor_n += 1 }
         if e.type == .BOSS_CHROME_ORB {
             boss_alive = true
+            boss_phase = e.boss_phase
             if shared.ENEMY_BOSS_CHROME_ORB_MAX_HP > 0 {
                 boss_hp_ratio = math.clamp(f32(e.hp) / f32(shared.ENEMY_BOSS_CHROME_ORB_MAX_HP), 0.0, 1.0)
             }
@@ -457,13 +647,24 @@ update_music :: proc(dt: f32) {
     music_state.target_sniper    = 0
     music_state.target_disruptor = 0
     music_state.target_boss      = 0
+    music_state.target_boss_intensity = 0
+    music_state.target_boss_sax  = 0
+    music_state.target_boss_tuba = 0
     music_state.target_boss_pitch = 1.0
 
     if boss_alive {
-        // Boss music takes over solo; pitch ramps up as boss takes damage.
+        // The difference stem continuously morphs the background synth knobs with lost HP.
+        // Sax enters only at phase 2; the authored tuba first appears halfway through phase 2.
         music_state.target_boss = BOSS_TRACK_VOL
         chaos := 1.0 - boss_hp_ratio
-        music_state.target_boss_pitch = 1.0 + chaos * 0.55
+        music_state.target_boss_intensity = BOSS_TRACK_VOL * chaos
+        if boss_phase >= 2 {
+            music_state.target_boss_sax = BOSS_TRACK_VOL
+            if boss_hp_ratio <= BOSS_TUBA_HP_THRESHOLD {
+                music_state.target_boss_tuba = BOSS_TRACK_VOL
+            }
+        }
+        music_state.target_boss_pitch = 1.0 + chaos * (BOSS_TRACK_MAX_PITCH - 1.0)
     } else {
         // Persistent unlocks: each track activates on first kill of that type and stays on.
         if shared.state.first_grunt_killed     { music_state.target_grunt    = GRUNT_TRACK_VOL }
@@ -474,6 +675,17 @@ update_music :: proc(dt: f32) {
         if disruptor_n > 0                     { music_state.target_disruptor = DISRUPTOR_TRACK_VOL }
     }
 
+    music_state.boss_hp_ratio = boss_hp_ratio
+    if boss_alive && !music_state.boss_was_alive {
+        // Always introduce the boss on the composition's downbeat with every stem aligned.
+        ma.sound_seek_to_pcm_frame(&shared.state.boss_track_sound, 0)
+        ma.sound_seek_to_pcm_frame(&shared.state.boss_intensity_track_sound, 0)
+        ma.sound_seek_to_pcm_frame(&shared.state.boss_sax_track_sound, 0)
+        ma.sound_seek_to_pcm_frame(&shared.state.boss_tuba_track_sound, 0)
+        music_state.current_boss_pitch = 1.0
+    }
+    music_state.boss_was_alive = boss_alive
+
     // Lerp current volumes toward targets.
     step := MUSIC_FADE_RATE * dt
     music_state.current_grunt     = approach(music_state.current_grunt,     music_state.target_grunt,     step)
@@ -482,17 +694,26 @@ update_music :: proc(dt: f32) {
     music_state.current_sniper    = approach(music_state.current_sniper,    music_state.target_sniper,    step)
     music_state.current_disruptor = approach(music_state.current_disruptor, music_state.target_disruptor, step)
     music_state.current_boss      = approach(music_state.current_boss,      music_state.target_boss,      step)
+    music_state.current_boss_intensity = approach(music_state.current_boss_intensity, music_state.target_boss_intensity, step)
+    music_state.current_boss_sax  = approach(music_state.current_boss_sax,  music_state.target_boss_sax,  step)
+    music_state.current_boss_tuba = approach(music_state.current_boss_tuba, music_state.target_boss_tuba, step)
 
     ma.sound_set_volume(&shared.state.drum_track_sound,      music_state.current_grunt)
     ma.sound_set_volume(&shared.state.synth_track_sound,     music_state.current_slowboy)
     ma.sound_set_volume(&shared.state.splitter_track_sound,  music_state.current_splitter)
     ma.sound_set_volume(&shared.state.sniper_track_sound,    music_state.current_sniper)
     ma.sound_set_volume(&shared.state.disruptor_track_sound, music_state.current_disruptor)
-    ma.sound_set_volume(&shared.state.boss_track_sound,      music_state.current_boss)
+    ma.sound_set_volume(&shared.state.boss_track_sound, music_state.current_boss)
+    ma.sound_set_volume(&shared.state.boss_intensity_track_sound, music_state.current_boss_intensity)
+    ma.sound_set_volume(&shared.state.boss_sax_track_sound, music_state.current_boss_sax)
+    ma.sound_set_volume(&shared.state.boss_tuba_track_sound, music_state.current_boss_tuba)
 
     // Pitch on the boss track changes more slowly so it's perceived as "speeding up over time"
     // rather than snapping with each laser added.
-    pitch_step := f32(0.25) * dt
+    pitch_step := BOSS_TRACK_PITCH_RATE * dt
     music_state.current_boss_pitch = approach(music_state.current_boss_pitch, music_state.target_boss_pitch, pitch_step)
     ma.sound_set_pitch(&shared.state.boss_track_sound, music_state.current_boss_pitch)
+    ma.sound_set_pitch(&shared.state.boss_intensity_track_sound, music_state.current_boss_pitch)
+    ma.sound_set_pitch(&shared.state.boss_sax_track_sound, music_state.current_boss_pitch)
+    ma.sound_set_pitch(&shared.state.boss_tuba_track_sound, music_state.current_boss_pitch)
 }

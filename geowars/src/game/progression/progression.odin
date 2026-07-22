@@ -210,7 +210,8 @@ update_wave_system :: proc(dt: f32) {
 
 // --- Wave content for level 1 ---
 // Difficulty ramp:
-//   W1-2: grunt-only intro
+//   W1:   boss-first opener (keeps the new score immediately testable from the first press)
+//   W2:   grunt intro
 //   W3-4: introduce sniper
 //   W5-6: introduce splitter + first slowboy
 //   W7-8: introduce disruptor (button under threat)
@@ -234,11 +235,14 @@ init_level_1_waves :: proc(level: ^shared.LevelDefinition) {
     disruptor :: proc(count: int, initial_delay: f32, interval_min, interval_max: f32) -> shared.WaveSpawnDirective {
         return {enemy_type=.DISRUPTOR, count=count, initial_delay=initial_delay, interval_min=interval_min, interval_max=interval_max}
     }
+    boss :: proc() -> shared.WaveSpawnDirective {
+        return {enemy_type=.BOSS_CHROME_ORB, count=1, initial_delay=0.0, interval_min=0.0, interval_max=0.0}
+    }
 
     // Slice literals in Odin live only as long as the enclosing function's scope, so we must
     // explicitly heap-allocate each wave's directive list.
     level.waves[0].directives = make([]shared.WaveSpawnDirective, 1)
-    level.waves[0].directives[0] = grunt(4, 0.5, 0.6, 0.9)
+    level.waves[0].directives[0] = boss()
 
     level.waves[1].directives = make([]shared.WaveSpawnDirective, 1)
     level.waves[1].directives[0] = grunt(7, 0.0, 0.4, 0.7)

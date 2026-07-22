@@ -13,15 +13,20 @@ ARENA_RADIUS :: ORTHO_HEIGHT * 2.4     // 3.6 — significantly bigger than the 
 ARENA_BOUNCE_DAMPING :: 0.6
 ARENA_RING_THICKNESS :: 0.025
 
-PLAYER_ACCELERATION       :: 15.0
+PLAYER_ACCELERATION       :: 24.0
 PLAYER_REVERSE_FACTOR     :: 0.5
-PLAYER_DAMPING            :: 2.5
+PLAYER_DAMPING            :: 4.0
 PLAYER_MAX_SPEED          :: 7.0
-PLAYER_DASH_SPEED_MULT    :: 1.5
-PLAYER_DASH_DURATION      :: 0.15
+PLAYER_DASH_SPEED_MULT    :: 1.8
+PLAYER_DASH_DURATION      :: 0.12
 PLAYER_DASH_COOLDOWN      :: 3.0
-PLAYER_DASH_TRAIL_LENGTH      :: 4
-PLAYER_DASH_TRAIL_SPAWN_RATE  :: 0.035
+// Number of stored afterimage positions and how often a new one is captured during a dash.
+// Smaller spacing + more entries reads as a denser motion-blur streak.
+PLAYER_DASH_TRAIL_LENGTH      :: 6
+PLAYER_DASH_TRAIL_SPAWN_RATE  :: 0.018
+// `dash_flash` lives slightly beyond the dash itself so the afterimages have time to fade in
+// place rather than disappearing the instant the dash ends.
+PLAYER_DASH_FLASH_DURATION    :: f32(0.30)
 PLAYER_SCALE              :: 0.15
 PLAYER_BOUNCE_BOUNDARY_OFFSET :: 0.1
 PLAYER_CORE_SHADER_RADIUS :: 0.04
@@ -106,7 +111,7 @@ BOSS_QUAD_WORLD_DIAMETER :: 8.5
 ENEMY_BOSS_ORBIT_RADIUS :: f32(ARENA_RADIUS * 0.25)     // boss circles a small inner ring
 ENEMY_BOSS_ORBIT_SPEED  :: f32(0.55)                    // rad/s; sign comes from boss_move_direction
 ENEMY_BOSS_LASER_LENGTH :: f32(ARENA_RADIUS * 1.05)     // long enough to cross the arena
-ENEMY_BOSS_LASER_SWEEP_SPEED :: f32(m.PI * 0.35)        // base sweep rate
+ENEMY_BOSS_LASER_SWEEP_SPEED :: f32(m.PI * 0.28)        // base sweep rate
 
 // --- Boss Phase 1 (single sweeping laser, slow grunt drip) ---
 // HP > 75% : clockwise. 75% > HP > 50% : counter-clockwise. Triggers phase 2 below 50%.
@@ -118,7 +123,7 @@ ENEMY_BOSS_PHASE2_MINION_SPAWN_INTERVAL :: f32(3.0)     // 1 minion every 3 seco
 ENEMY_BOSS_PHASE2_SLOWBOY_CHANCE :: f32(0.25)           // 25% slowboy, 75% grunt
 ENEMY_BOSS_MAX_LASERS :: 6                              // shader/collision loop bound
 
-BOSS_LASER_WIDTH  :: f32(0.10)                          // visible beam width in world units
+BOSS_LASER_WIDTH  :: f32(0.07)                          // visible beam width in world units
 BOSS_LASER_DAMAGE :: 1
 ENEMY_SHADER_VISUAL_SCALE_MULTIPLIER :: 3.0
 
@@ -146,6 +151,10 @@ ENEMY_SPLITTER_SPEED       :: f32(0.30)
 ENEMY_SPLITTER_DEATH_ANIM  :: f32(1.0)
 ENEMY_SPLITTER_MINI_COUNT  :: 3
 ENEMY_SPLITTER_MINI_BURST_SPEED :: f32(1.2)
+// How long each mini coasts on its burst velocity before homing. Randomised per-mini so the
+// three siblings don't all transition on the same frame and immediately re-stack.
+ENEMY_SPLITTER_MINI_BURST_DURATION_MIN :: f32(1.0)
+ENEMY_SPLITTER_MINI_BURST_DURATION_MAX :: f32(1.5)
 
 // --- Sniper (telegraphed hitscan) ---
 ENEMY_SNIPER_SCALE         :: f32(0.22)
@@ -188,7 +197,6 @@ ENEMY_BASE_ALPHA :: 0.65
 ENEMY_WANDER_INFLUENCE :: 0.35
 ENEMY_WANDER_DIRECTION_CHANGE_INTERVAL :: 1.5
 ENEMY_GRUNT_MAX_HP :: 4
-ENEMY_DEATH_ANIM_DURATION :: 1.0
 GRUNT_DEATH_ANIM_DURATION :: 3.0
 SLOWBOY_DEATH_ANIM_DURATION :: 1.0
 BOSS_DEATH_ANIM_DURATION :: 4.0
@@ -229,6 +237,15 @@ RMB_PULSE_PARTICLE_SPEED   :: f32(7.0)
 RMB_PULSE_PARTICLE_LIFETIME :: f32(0.45)
 RMB_PULSE_PARTICLE_SIZE    :: f32(0.06)
 RMB_PULSE_PARTICLE_COLOR   :: m.vec4{1.0, 0.45, 1.0, 0.95}
+
+// --- RMB full-charge beam ---
+// The directional purple lance fired alongside the pulse on a >=100% charge release. The beam
+// is rendered in fs_bg (so it can warp the background) and applies a one-shot line-vs-enemy
+// damage tick on release. Cosmetic timer is a brief flash; collision is one frame only.
+RMB_BEAM_DURATION   :: f32(0.40)  // total visible time (s)
+RMB_BEAM_LENGTH     :: f32(3.0)   // world units along player_aim_dir
+RMB_BEAM_HALF_WIDTH :: f32(0.10)  // collision/visual half-width in world units
+RMB_BEAM_DAMAGE_MULT :: f32(2.0)  // multiplier on PARTICLE_DAMAGE_VALUE * eff_rmb_damage_mult
 
 // Rendering Internals
 vertex_stride :: size_of(f32) * 7

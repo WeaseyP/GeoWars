@@ -19,8 +19,9 @@ emit_enemy :: proc(enemy_data: shared.Enemy) {
 }
 
 // emit_grunt_at_pos emits a fresh GRUNT skipping the perimeter-spawn search. Used by Splitter
-// minis (they inherit position + initial burst velocity from their parent).
-emit_grunt_at_pos :: proc(pos: m.vec2, vel: m.vec2) {
+// minis (they inherit position + initial burst velocity from their parent). burst_duration
+// preserves `vel` for that many seconds before normal homing kicks in; pass 0 for instant homing.
+emit_grunt_at_pos :: proc(pos: m.vec2, vel: m.vec2, burst_duration: f32 = 0.0) {
     context = runtime.default_context()
     color := m.vec4{0.9, 0.1, 0.7, shared.ENEMY_BASE_ALPHA}
     initial_wander_vec := m.angle_to_vec2(rand.float32() * m.TAU)
@@ -40,6 +41,7 @@ emit_grunt_at_pos :: proc(pos: m.vec2, vel: m.vec2) {
         is_dying = false, dying_timer = 0.0, death_rect_offset = 0.0,
         death_anim_max_duration = shared.GRUNT_DEATH_ANIM_DURATION,
         boss_move_direction = 1.0,
+        burst_timer = burst_duration,
     }
     emit_enemy(enemy_data)
 }
@@ -231,12 +233,10 @@ spawn_enemy_tiered :: proc(current_ortho_width: f32, current_ortho_height: f32, 
         boss_laser_count = 1,
         boss_laser_slot_order = initial_slot_order,
         boss_laser_fade_in_timer = 0.0,
-        boss_detection_print_cooldown = 0.0,
         ai_state = initial_ai_state,
         ai_state_timer = initial_ai_timer,
         ai_state_total = initial_ai_total,
         ai_target_pos = {0, 0},
-        ai_origin_pos = start_pos_en,
     }
 
     emit_enemy(enemy_to_spawn)
@@ -246,6 +246,16 @@ spawn_enemy_tiered :: proc(current_ortho_width: f32, current_ortho_height: f32, 
 
 @(private)
 update_grunt_alive :: proc(e: ^shared.Enemy, dt: f32, player_pos: m.vec2) {
+    // Splitter-mini burst phase: preserve spawn velocity so the three minis fan out instead
+    // of all immediately stacking into a homing pile.
+    if e.burst_timer > 0.0 {
+        e.burst_timer -= dt
+        speed := m.len_vec2(e.vel)
+        speed_norm := math.clamp(speed / (shared.ENEMY_GRUNT_SPEED * shared.ELITE_SPEED_MULT_GOLD), 0.0, 1.0)
+        e.rotation += e.angular_vel * (1.0 + speed_norm * 1.5) * dt
+        return
+    }
+
     e.wander_timer -= dt
     if e.wander_timer <= 0.0 {
         e.current_wander_vector = m.angle_to_vec2(rand.float32() * m.TAU)
@@ -286,7 +296,7 @@ update_splitter_alive :: proc(e: ^shared.Enemy, dt: f32, player_pos: m.vec2) {
 }
 
 @(private)
-update_disruptor_alive :: proc(e: ^shared.Enemy, dt: f32) {
+update_disruptor_alive :: proc(e: ^shared.Enemy) {
     // Beeline straight to (0,0). Rotation always faces motion direction.
     dir := -e.pos
     if m.len_sq_vec2(dir) > 0.0001 {
@@ -296,8 +306,6 @@ update_disruptor_alive :: proc(e: ^shared.Enemy, dt: f32) {
     } else {
         e.vel = m.vec2_zero()
     }
-    // Spin a bit to feel "alive" / hostile
-    e.rotation += dt * 0.0 // (rotation is dictated by direction)
 }
 
 // Slowboy state machine. Returns the visual shake offset (for the instance position) and stuffs
@@ -324,7 +332,6 @@ update_slowboy_alive :: proc(e: ^shared.Enemy, dt: f32, player_pos: m.vec2,
             e.ai_state_timer = shared.SLOWBOY_WINDUP_DURATION
             e.ai_state_total = shared.SLOWBOY_WINDUP_DURATION
             e.ai_target_pos = player_pos
-            e.ai_origin_pos = e.pos
             e.vel = {0, 0}
         }
     case .WINDUP:
@@ -356,7 +363,6 @@ update_slowboy_alive :: proc(e: ^shared.Enemy, dt: f32, player_pos: m.vec2,
             e.ai_state = i32(shared.SlowboyState.CHARGE)
             e.ai_state_timer = shared.SLOWBOY_CHARGE_DURATION
             e.ai_state_total = shared.SLOWBOY_CHARGE_DURATION
-            e.ai_origin_pos = e.pos
         }
     case .CHARGE:
         // Vel was set on entry; keep spinning hard.
@@ -652,7 +658,7 @@ update_and_instance_enemies :: proc(dt: f32) -> int {
                 }
                 effect = {0.0, f32(e.ai_state), progress, 1.0}
             case .DISRUPTOR:
-                update_disruptor_alive(e, dt)
+                update_disruptor_alive(e)
                 effect = {0.0, 0.0, 1.0, 1.0}
             }
         }

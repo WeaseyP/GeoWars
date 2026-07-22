@@ -34,6 +34,18 @@ rmb_hum_pcm_data: [RMB_PARTICLE_SOUND_DURATION_FRAMES]f32
 rmb_whoosh_pcm_data: [RMB_PARTICLE_SOUND_DURATION_FRAMES]f32
 rmb_hum_audio_buffer: ma.audio_buffer
 rmb_whoosh_audio_buffer: ma.audio_buffer
+// Shared swirl voices. The stream callback traverses the engine's node graph on the audio
+// thread, so per-particle sound_init/sound_uninit from the game thread was a use-after-free.
+// These two voices are created once during init (before the stream starts), loop forever,
+// and are only ever volume-modulated at runtime — never uninitialized until cleanup_audio.
+rmb_hum_voice: ma.sound
+rmb_whoosh_voice: ma.sound
+rmb_swirl_voices_ready: bool
+// Volume-multiplier caps for the summed per-particle contributions: the buffers' content is
+// generated at RMB_HUM_AMPLITUDE / RMB_WHOOSH_AMPLITUDE, so these keep the effective output
+// amplitude (content x multiplier) below clipping no matter how many particles are live.
+RMB_SWIRL_HUM_VOICE_MAX_VOLUME :: 8.0
+RMB_SWIRL_WHOOSH_VOICE_MAX_VOLUME :: 3.0
 
 // LMB Hit Sound Effects Definitions
 LMB_HIT_WHOOSH_DURATION_FRAMES :: LMB_SOUND_SAMPLE_RATE / 10
@@ -72,7 +84,6 @@ DRUM_TRACK_BPM :: 160.0
 DRUM_TRACK_BEATS_PER_BAR :: 4
 DRUM_TRACK_NUM_BARS :: 2
 DRUM_TRACK_SECONDS_PER_BEAT :: 60.0 / DRUM_TRACK_BPM
-DRUM_TRACK_AMPLITUDE :: 0.6
 drum_track_pcm_data: []f32
 drum_track_audio_buffer: ma.audio_buffer
 
@@ -103,9 +114,9 @@ init_audio :: proc() {
         fmt.eprintf("!!! CRITICAL: Failed to allocate drum_track_pcm_data slice! Total Frames: %d", DRUM_TRACK_TOTAL_FRAMES);
         return; 
     }
-    fmt.printf("--- Drum track PCM data slice allocated. Total Frames: %d ---", DRUM_TRACK_TOTAL_FRAMES);
+    fmt.printf("--- Drum track PCM data slice allocated. Total Frames: %d ---\n", DRUM_TRACK_TOTAL_FRAMES);
 
-    fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---");
+    fmt.printf("--- Generating Revised Placeholder Drum Track PCM data (160 BPM)... ---\n");
     
     KICK_DURATION_FRAMES: int = DRUM_TRACK_FRAMES_PER_BEAT / 3; 
     KICK_START_FREQ :: 120.0; 
@@ -205,26 +216,12 @@ init_audio :: proc() {
     for i_clamp in 0..<DRUM_TRACK_TOTAL_FRAMES { 
         drum_track_pcm_data[i_clamp] = math.clamp(drum_track_pcm_data[i_clamp], -0.95, 0.95);
     }
-    fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---");
-
-    // Sokol Audio Setup
-    sokol_audio_desc := sa.Desc {
-        sample_rate = LMB_SOUND_SAMPLE_RATE, 
-        num_channels = LMB_SOUND_CHANNELS,   
-        buffer_frames = 1024, 
-        packet_frames = 0,   
-        num_packets = 0,     
-        stream_userdata_cb = geowars_audio_stream_callback,
-        user_data = nil, 
-    }
-    sa.setup(sokol_audio_desc)
-    if !sa.isvalid() {
-        fmt.eprintf("!!! CRITICAL: Sokol Audio setup failed!\n")
-    } else {
-        fmt.printf("--- Sokol Audio Initialized (Sample Rate: %v, Channels: %v) ---\n", sa.sample_rate(), sa.channels())
-    }
+    fmt.printf("--- Revised Placeholder Drum Track PCM data generated. ---\n");
 
     // Miniaudio Engine Setup
+    // NOTE: sokol-audio (and with it geowars_audio_stream_callback's thread) is started at
+    // the very END of init_audio, after every sound node below exists — the callback reads
+    // the engine's node graph, so the graph must be fully built before the stream runs.
     engine_config := ma.engine_config_init()
     engine_config.noDevice = true 
     engine_config.channels = u32(LMB_SOUND_CHANNELS)   
@@ -317,8 +314,31 @@ init_audio :: proc() {
 
     whoosh_ab_config := ma.audio_buffer_config_init(ma.format.f32, u32(LMB_SOUND_CHANNELS), u64(RMB_PARTICLE_SOUND_DURATION_FRAMES), rawptr(&rmb_whoosh_pcm_data[0]), nil)
     init_whoosh_ab_result := ma.audio_buffer_init_copy(&whoosh_ab_config, &rmb_whoosh_audio_buffer)
-    if init_whoosh_ab_result == .SUCCESS { fmt.printf("--- RMB Whoosh audio_buffer initialized. ---\n") } 
+    if init_whoosh_ab_result == .SUCCESS { fmt.printf("--- RMB Whoosh audio_buffer initialized. ---\n") }
     else { fmt.eprintf("!!! CRITICAL: RMB Whoosh audio_buffer_init_copy failed! Error: %v\n", init_whoosh_ab_result) }
+
+    // The two persistent swirl voices: looping at volume 0 until particles contribute.
+    if init_hum_ab_result == .SUCCESS && init_whoosh_ab_result == .SUCCESS {
+        swirl_voice_flags: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }
+        init_hum_voice_result := ma.sound_init_from_data_source(&shared.state.audio_engine, (^ma.data_source)(&rmb_hum_audio_buffer), swirl_voice_flags, nil, &rmb_hum_voice)
+        init_whoosh_voice_result: ma.result = .ERROR
+        if init_hum_voice_result == .SUCCESS {
+            init_whoosh_voice_result = ma.sound_init_from_data_source(&shared.state.audio_engine, (^ma.data_source)(&rmb_whoosh_audio_buffer), swirl_voice_flags, nil, &rmb_whoosh_voice)
+            if init_whoosh_voice_result != .SUCCESS { ma.sound_uninit(&rmb_hum_voice) }
+        }
+        if init_hum_voice_result == .SUCCESS && init_whoosh_voice_result == .SUCCESS {
+            ma.sound_set_looping(&rmb_hum_voice, true)
+            ma.sound_set_looping(&rmb_whoosh_voice, true)
+            ma.sound_set_volume(&rmb_hum_voice, 0.0)
+            ma.sound_set_volume(&rmb_whoosh_voice, 0.0)
+            ma.sound_start(&rmb_hum_voice)
+            ma.sound_start(&rmb_whoosh_voice)
+            rmb_swirl_voices_ready = true
+            fmt.printf("--- RMB swirl shared voices initialized (looping, volume 0). ---\n")
+        } else {
+            fmt.eprintf("!!! CRITICAL: RMB swirl shared voice init failed! hum: %v, whoosh: %v\n", init_hum_voice_result, init_whoosh_voice_result)
+        }
+    }
     fmt.printf("--- RMB Particle Sounds Initialized ---\n")
 
     fmt.printf("--- Generating 'Enemy Hit' sound PCM data... ---\n")
@@ -496,9 +516,9 @@ init_audio :: proc() {
         p_drum_track_data_source := (^ma.data_source)(&drum_track_audio_buffer);
         init_drum_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_drum_track_data_source, drum_track_sound_flags, nil, &shared.state.drum_track_sound);
         if init_drum_sound_result == .SUCCESS {
-            ma.sound_set_looping(&shared.state.drum_track_sound, true); 
-            ma.sound_set_volume(&shared.state.drum_track_sound, DRUM_TRACK_AMPLITUDE); 
-            fmt.printf("--- Miniaudio drum_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", DRUM_TRACK_AMPLITUDE);
+            ma.sound_set_looping(&shared.state.drum_track_sound, true);
+            // Volume is overwritten by music.update_music; leave at default until then.
+            fmt.printf("--- Miniaudio drum_track_sound initialized successfully (Looping). ---\n");
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for drum_track_sound failed! Error: %v\n", init_drum_sound_result);
             ma.audio_buffer_uninit(&drum_track_audio_buffer); 
@@ -600,8 +620,8 @@ init_audio :: proc() {
         init_synth_sound_result := ma.sound_init_from_data_source(&shared.state.audio_engine, p_synth_track_data_source, synth_track_sound_flags, nil, &shared.state.synth_track_sound);
         if init_synth_sound_result == .SUCCESS {
             ma.sound_set_looping(&shared.state.synth_track_sound, true);
-            ma.sound_set_volume(&shared.state.synth_track_sound, 1.0); // PCM data already has SYNTH_TRACK_AMPLITUDE baked in, so master volume is 1.0 unless further adjustment needed
-            fmt.printf("--- Miniaudio synth_track_sound initialized successfully (Looping, Volume: %.2f) ---\n", 1.0);
+            // Volume is overwritten by music.update_music; leave at default until then.
+            fmt.printf("--- Miniaudio synth_track_sound initialized successfully (Looping). ---\n");
         } else {
             fmt.eprintf("!!! CRITICAL: Miniaudio sound_init_from_data_source for synth_track_sound failed! Error: %v\n", init_synth_sound_result);
             ma.audio_buffer_uninit(&synth_track_audio_buffer);
@@ -613,14 +633,52 @@ init_audio :: proc() {
     // Generate per-enemy music tracks + boss track. After this call, every track loops at
     // volume 0; update_music in the per-frame loop fades them up/down based on alive enemies.
     init_music_tracks()
+
+    // Start the sokol-audio stream LAST: from this point on the audio thread traverses the
+    // engine's node graph every buffer, and the graph must never be mutated again (sounds
+    // are only volume-modulated at runtime, and torn down only after sa.shutdown).
+    sokol_audio_desc := sa.Desc {
+        sample_rate = LMB_SOUND_SAMPLE_RATE,
+        num_channels = LMB_SOUND_CHANNELS,
+        buffer_frames = 1024,
+        packet_frames = 0,
+        num_packets = 0,
+        stream_userdata_cb = geowars_audio_stream_callback,
+        user_data = nil,
+    }
+    sa.setup(sokol_audio_desc)
+    if !sa.isvalid() {
+        fmt.eprintf("!!! CRITICAL: Sokol Audio setup failed!\n")
+    } else {
+        fmt.printf("--- Sokol Audio Initialized (Sample Rate: %v, Channels: %v) ---\n", sa.sample_rate(), sa.channels())
+    }
 }
 
 geowars_audio_stream_callback :: proc "c" (buffer: ^f32, num_frames: c.int, num_channels: c.int, user_data: rawptr) {
     ma.engine_read_pcm_frames(&shared.state.audio_engine, buffer, u64(num_frames), nil)
 }
 
+// Called once per frame by the particle system with the summed hum/whoosh contributions of
+// all live swirl particles. sound_set_volume is an atomic write, so this is safe against
+// the concurrently-running audio thread; a sum of 0 silences the voices without ever
+// touching the node graph.
+set_swirl_voice_volumes :: proc(hum_volume: f32, whoosh_volume: f32) {
+    if !rmb_swirl_voices_ready { return }
+    ma.sound_set_volume(&rmb_hum_voice, math.clamp(hum_volume, 0.0, RMB_SWIRL_HUM_VOICE_MAX_VOLUME))
+    ma.sound_set_volume(&rmb_whoosh_voice, math.clamp(whoosh_volume, 0.0, RMB_SWIRL_WHOOSH_VOICE_MAX_VOLUME))
+}
+
 cleanup_audio :: proc() {
+    // Stop the audio thread BEFORE tearing down the node graph it reads. sa.shutdown blocks
+    // until the stream is stopped; the sa.isvalid guard in core's cleanup then no-ops.
+    if sa.isvalid() { sa.shutdown(); fmt.printf("--- Sokol Audio shutdown ---\n") }
     cleanup_music_tracks()
+    if rmb_swirl_voices_ready {
+        ma.sound_uninit(&rmb_hum_voice)
+        ma.sound_uninit(&rmb_whoosh_voice)
+        rmb_swirl_voices_ready = false
+        fmt.printf("--- RMB swirl shared voices uninitialized ---\n")
+    }
     ma.sound_uninit(&shared.state.lmb_sound); fmt.printf("--- Miniaudio lmb_sound uninitialized ---\n")
     ma.audio_buffer_uninit(&lmb_sound_audio_buffer); fmt.printf("--- Miniaudio lmb_sound_audio_buffer uninitialized ---\n")
 

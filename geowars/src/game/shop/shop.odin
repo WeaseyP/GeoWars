@@ -46,8 +46,21 @@ apply_lmb_damage_plus_2 :: proc() { shared.state.eff_lmb_damage += 2 }
 @(private)
 apply_lmb_rapid_fire :: proc() { shared.state.eff_lmb_cooldown *= 0.7 }
 
+// When max_charge grows we scale charge_rate by the same ratio so time-to-100% stays
+// roughly constant; otherwise stacking max-charge upgrades silently makes the meter feel
+// broken in late rounds (a 50% bigger bar at the same fill rate is a 50% slower meter).
 @(private)
-apply_rmb_extra_charge :: proc() { shared.state.eff_rmb_max_charge += 0.5 }
+scale_rmb_max_charge :: proc(delta: f32) {
+    old_max := shared.state.eff_rmb_max_charge
+    new_max := old_max + delta
+    if old_max > 0.0 {
+        shared.state.eff_rmb_charge_rate *= new_max / old_max
+    }
+    shared.state.eff_rmb_max_charge = new_max
+}
+
+@(private)
+apply_rmb_extra_charge :: proc() { scale_rmb_max_charge(0.5) }
 
 @(private)
 apply_rmb_fast_regen :: proc() { shared.state.eff_rmb_charge_rate *= 1.5 }
@@ -59,7 +72,7 @@ apply_rmb_instant_refill :: proc() {
 
 @(private)
 apply_rmb_overcharge :: proc() {
-    shared.state.eff_rmb_max_charge += 1.0
+    scale_rmb_max_charge(1.0)
     shared.state.eff_rmb_damage_mult *= 1.4
 }
 
@@ -81,7 +94,7 @@ apply_tough_skin :: proc() {
 upgrade_catalog := [?]UpgradeDef{
     { .MAX_HP_PLUS_1,            1, "Tougher Hide",   "+1 max HP. Heals +1.",                       apply_max_hp_plus_1            },
     { .LMB_RAPID_FIRE,           1, "Quick Hands",    "LMB cooldown -30%.",                         apply_lmb_rapid_fire           },
-    { .RMB_EXTRA_CHARGE,         1, "Bigger Bits",    "RMB max charge cap +50%.",                   apply_rmb_extra_charge         },
+    { .RMB_EXTRA_CHARGE,         1, "Bigger Bits",    "RMB max charge +50%; refill time unchanged.", apply_rmb_extra_charge        },
     { .RMB_FAST_REGEN,           1, "Quick Recharge", "RMB charges 50% faster.",                    apply_rmb_fast_regen           },
     { .MAX_SPEED_PLUS,           1, "Brisk",          "Max speed +15%.",                            apply_max_speed_plus           },
     { .FAST_DASH,                1, "Cooled Dash",    "Dash cooldown -40%.",                        apply_fast_dash                },
@@ -92,7 +105,7 @@ upgrade_catalog := [?]UpgradeDef{
 
     { .LMB_DAMAGE_PLUS_2,        3, "Hot Shot",       "LMB damage +2.",                             apply_lmb_damage_plus_2        },
     { .MAX_HP_PLUS_2_FULL_HEAL,  3, "Steadfast",      "+2 max HP. Full heal.",                      apply_max_hp_plus_2_full_heal  },
-    { .RMB_OVERCHARGE,           3, "Overcharge",     "RMB max +100% & damage +40%.",               apply_rmb_overcharge           },
+    { .RMB_OVERCHARGE,           3, "Overcharge",     "RMB max +100% & damage +40%; refill time same.", apply_rmb_overcharge       },
 }
 
 @(private)
@@ -197,27 +210,6 @@ choose :: proc(slot: int) {
     shared.state.wave_system.shops_offered += 1
     shared.state.game_mode = .PLAYING
     shared.state.shop.hovered = -1
-}
-
-// Mouse-hover detection: convert the mouse to NDC, intersect with the three card rectangles.
-// Cards are arranged horizontally centred on the screen at ~55% height. Geometry must match
-// the shader's rendering — the constants here are duplicated in shader.glsl/fs_bg.
-@(private)
-update_hover :: proc() {
-    if shared.state.game_mode != .SHOP { return }
-    // Card layout in NDC (-1..1)
-    card_half_w :: f32(0.20)
-    card_half_h :: f32(0.30)
-    card_y      :: f32(-0.05) // slight above-centre
-    centres := [3]f32{ -0.55, 0.0, 0.55 }
-
-    // Mouse is in pixels with y down. Convert to NDC.
-    // Note: we rely on the same widthf/heightf the renderer uses; close enough.
-    // Caller passes width/height via parameters in update_shop.
-    _ = centres
-    _ = card_half_w
-    _ = card_half_h
-    _ = card_y
 }
 
 // Per-frame update during SHOP mode. Tracks hover (for visual feedback) and reads input picks.

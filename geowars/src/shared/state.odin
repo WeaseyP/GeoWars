@@ -41,6 +41,10 @@ state: struct {
     sniper_track_sound: ma.sound,
     disruptor_track_sound: ma.sound,
     boss_track_sound: ma.sound,
+    boss_intensity_track_sound: ma.sound,
+    boss_sax_track_sound: ma.sound,
+    boss_tuba_track_sound: ma.sound,
+    boss_hit_stinger_sound: ma.sound,
 
     // Once any enemy of these types is killed, its track unlocks and keeps playing for the rest
     // of the run (the music "builds" as new types get introduced). Disruptor is intentionally
@@ -69,12 +73,25 @@ state: struct {
     // and read by the player shader to draw a muzzle pulse / inward-suck animation.
     lmb_fire_flash: f32, rmb_fire_flash: f32,
     is_dashing: bool, dash_timer: f32, dash_cooldown_timer: f32,
+    // dash_flash is set to 1.0 on dash start and decays over PLAYER_DASH_FLASH_DURATION; drives
+    // the player FS shader's stretch/tint and the afterimage echo opacity in the renderer.
+    dash_flash: f32,
+    // Direction the dash launched along, captured at start so the stretch axis stays stable
+    // even after the dash is over and player_vel has rotated to fresh input.
+    dash_direction: m.vec2,
 
     player_dash_traiL_pos: [PLAYER_DASH_TRAIL_LENGTH]m.vec2,
     player_dash_trail_count: int,
     dash_trail_spawn_timer: f32,
 
     rmb_charge: f32, // current charge meter [0..eff_rmb_max_charge]; consumed on RMB press
+
+    // Full-charge RMB beam. Set on release at >=RMB_BEAM_THRESHOLD; ticks down each frame.
+    // Read by fs_bg to draw a directional purple lance + screen warp originating at rmb_beam_origin.
+    rmb_beam_origin: m.vec2,
+    rmb_beam_dir:    m.vec2, // unit vector along the beam axis
+    rmb_beam_timer:  f32,    // remaining seconds; 0 means no beam visible
+    rmb_beam_total:  f32,    // duration the beam was launched with (so the shader can fade it)
 
     mouse_screen_pos: m.vec2,
 

@@ -1,7 +1,6 @@
 package shared
 
 import m "../vendor/math"
-import ma "../vendor/miniaudio"
 import "base:runtime"
 
 
@@ -67,9 +66,7 @@ Particle :: struct {
     is_burst_particle: bool,
     is_swirling_charge: bool,
     active:           bool,
-    sound_hum: ma.sound,
-    sound_whoosh: ma.sound,
-    has_active_sound: bool,
+    has_active_sound: bool, // contributes to the shared swirl voices (see audio.set_swirl_voice_volumes)
 }
 Particle_Instance_Data :: struct #align(16) {
     using _: struct #packed {
@@ -188,14 +185,16 @@ Enemy :: struct {
     dmg_mult:      f32,
     boss_laser_slot_order: [6]int,   // permutation of 0..5; lasers fill these slots in order
     boss_laser_fade_in_timer: f32,   // counts down from 1.0 to 0.0 while the most recent laser materialises
-    boss_detection_print_cooldown: f32,
 
     // --- AI sub-state (used by slowboy + sniper; type-specific interpretation) ---
     ai_state:         i32,
     ai_state_timer:   f32, // remaining seconds in current state
     ai_state_total:   f32, // total duration of the current state (for normalised progress)
     ai_target_pos:    m.vec2, // lock-on snapshot (slowboy) or aim target (sniper)
-    ai_origin_pos:    m.vec2, // anchor at the moment the current state started (slowboy charge)
+
+    // Splitter-mini burst: while burst_timer > 0, a GRUNT preserves its spawn velocity
+    // instead of homing on the player. Used so splitter minis fan out before chasing.
+    burst_timer:      f32,
 }
 
 Enemy_Instance_Data :: struct #align(16) {

@@ -1,7 +1,5 @@
 package particle
 import "base:runtime"
-import ma "../../vendor/miniaudio"
-import "core:fmt"
 import rand "core:math/rand"
 import m "../../vendor/math"
 import sapp "../../vendor/sokol/app"
@@ -13,37 +11,14 @@ import audio "../../audio"
 // --- Particle System ---
 emit_particle :: proc(part: shared.Particle) {
     context = runtime.default_context()
-    p_to_init_sound := &shared.state.particles[shared.state.next_particle_index]
-    p_to_init_sound^ = part
-    p_to_init_sound.has_active_sound = false
-
-    if p_to_init_sound.is_swirling_charge {
-        p_to_init_sound.has_active_sound = true
-        sound_flags_particle: ma.sound_flags = { .NO_PITCH, .NO_SPATIALIZATION }
-        hum_init_res := ma.sound_init_from_data_source(&shared.state.audio_engine, (^ma.data_source)(&audio.rmb_hum_audio_buffer), sound_flags_particle, nil, &p_to_init_sound.sound_hum)
-        if hum_init_res == .SUCCESS {
-            ma.sound_set_looping(&p_to_init_sound.sound_hum, true)
-            ma.sound_set_volume(&p_to_init_sound.sound_hum, audio.RMB_HUM_AMPLITUDE)
-            ma.sound_start(&p_to_init_sound.sound_hum)
-        } else {
-            fmt.eprintf("!!! ERROR: Failed to init hum sound for particle. Code: %v\n", hum_init_res)
-            p_to_init_sound.has_active_sound = false
-        }
-
-        if p_to_init_sound.has_active_sound {
-            whoosh_init_res := ma.sound_init_from_data_source(&shared.state.audio_engine, (^ma.data_source)(&audio.rmb_whoosh_audio_buffer), sound_flags_particle, nil, &p_to_init_sound.sound_whoosh)
-            if whoosh_init_res == .SUCCESS {
-                ma.sound_set_looping(&p_to_init_sound.sound_whoosh, true)
-                ma.sound_set_volume(&p_to_init_sound.sound_whoosh, 0.0)
-                ma.sound_start(&p_to_init_sound.sound_whoosh)
-            } else {
-                fmt.eprintf("!!! ERROR: Failed to init whoosh sound for particle. Code: %v\n", whoosh_init_res)
-                ma.sound_uninit(&p_to_init_sound.sound_hum)
-                p_to_init_sound.has_active_sound = false
-            }
-        }
-    }
-    p_to_init_sound.active = true
+    p := &shared.state.particles[shared.state.next_particle_index]
+    p^ = part
+    // Swirl particles no longer own per-particle ma.sound objects — creating/destroying
+    // sounds at runtime races the audio thread (use-after-free in the stream callback).
+    // They just flag themselves as contributors to the two shared swirl voices, which
+    // update_and_instance_particles sums into one volume write per frame.
+    p.has_active_sound = part.is_swirling_charge
+    p.active = true
     shared.state.next_particle_index = (shared.state.next_particle_index + 1) % shared.MAX_PARTICLES
 }
 
@@ -118,6 +93,8 @@ spawn_rmb_pulse :: proc(charge: f32) {
 update_and_instance_particles :: proc(dt: f32) -> int {
     context = runtime.default_context()
     live_particle_count := 0
+    swirl_hum_volume: f32 = 0.0
+    swirl_whoosh_volume: f32 = 0.0
 
     for i in 0..<shared.MAX_PARTICLES {
         if !shared.state.particles[i].active { continue }
@@ -130,20 +107,22 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             world_half_height_part: f32 = shared.ORTHO_HEIGHT
             off_screen_margin_part: f32 = 0.1
 
+            // Cull against the visible viewport, not world origin: with a follow camera
+            // the player can be far from (0,0), and particles spawned at p.pos must be
+            // tested in camera-relative space.
+            cam := shared.state.camera_pos
+            rel_x := p.pos.x - cam.x
+            rel_y := p.pos.y - cam.y
             is_off_screen := false
-            if p.pos.x < -world_half_width_part - off_screen_margin_part ||
-               p.pos.x >  world_half_width_part + off_screen_margin_part ||
-               p.pos.y < -world_half_height_part - off_screen_margin_part ||
-               p.pos.y >  world_half_height_part + off_screen_margin_part {
+            if rel_x < -world_half_width_part - off_screen_margin_part ||
+               rel_x >  world_half_width_part + off_screen_margin_part ||
+               rel_y < -world_half_height_part - off_screen_margin_part ||
+               rel_y >  world_half_height_part + off_screen_margin_part {
                 is_off_screen = true
             }
 
             if is_off_screen {
-                if p.has_active_sound {
-                    ma.sound_uninit(&p.sound_hum)
-                    ma.sound_uninit(&p.sound_whoosh)
-                    p.has_active_sound = false
-                }
+                p.has_active_sound = false
                 p.active = false
                 continue
             }
@@ -154,10 +133,8 @@ update_and_instance_particles :: proc(dt: f32) -> int {
                 if audio.MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT > 0.001 {
                     speed_factor_part = math.clamp(current_speed_part / audio.MAX_PARTICLE_SPEED_FOR_SOUND_EFFECT, 0.0, 1.0)
                 } else { speed_factor_part = 0.0 }
-                hum_target_volume_part := (1.0 - speed_factor_part) * audio.RMB_HUM_AMPLITUDE
-                whoosh_target_volume_part := speed_factor_part * audio.RMB_WHOOSH_AMPLITUDE
-                ma.sound_set_volume(&p.sound_hum, hum_target_volume_part)
-                ma.sound_set_volume(&p.sound_whoosh, whoosh_target_volume_part)
+                swirl_hum_volume += (1.0 - speed_factor_part) * audio.RMB_HUM_AMPLITUDE
+                swirl_whoosh_volume += speed_factor_part * audio.RMB_WHOOSH_AMPLITUDE
             }
             p.rotation += p.angular_vel * dt
             if p.rotation > m.TAU { p.rotation -= m.TAU } else if p.rotation < 0 { p.rotation += m.TAU }
@@ -181,11 +158,7 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             }
 
             if !p.is_swirling_charge && p.life_remaining <= 0.0 {
-                if p.has_active_sound {
-                    ma.sound_uninit(&p.sound_hum)
-                    ma.sound_uninit(&p.sound_whoosh)
-                    p.has_active_sound = false
-                }
+                p.has_active_sound = false
                 p.active = false
                 continue
             }
@@ -211,6 +184,10 @@ update_and_instance_particles :: proc(dt: f32) -> int {
             live_particle_count += 1
         }
     }
+
+    // One volume write per frame for the shared swirl voices; a sum of 0 silences them
+    // without ever uninit-ing a sound node the audio thread may be mid-read on.
+    audio.set_swirl_voice_volumes(swirl_hum_volume, swirl_whoosh_volume)
     return live_particle_count
 }
 

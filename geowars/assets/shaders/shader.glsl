@@ -24,6 +24,8 @@ layout(binding=0) uniform bg_fs_params {
     vec4 wave_button_state;  // x=next_wave_idx (0..10), y=remaining (10-x), z=player_in_range, w=press_flash
     vec4 shop_state;         // x=active (0/1), y=hovered_idx (-1..2), z=is_pre_boss, w=time_in_shop
     vec4 shop_tiers;         // tier of card 0/1/2 (1.0/2.0/3.0); .w unused
+    vec4 rmb_beam_origin_dir;// xy=origin in world units, zw=unit beam dir (length-1 when active, zero when inactive)
+    vec4 rmb_beam_params;    // x=fade_progress (1=just-fired, 0=ended), y=length(world), z=half_width(world); w unused
 };
 out vec4 frag_color;
 
@@ -123,6 +125,55 @@ void main() { // fs_bg main
         vec3 ring_base = mix(healthy_ring, danger_ring, danger);
         vec3 ring_color = ring_base * (0.85 + 0.15 * sin(time * pulse_rate));
         final_color = mix(final_color, ring_color, ring_alpha * 0.95);
+
+        // --- RMB full-charge beam (directional purple lance with screen warp) ---
+        // Drawn in world_uv so it lives in the world, scrolls with the camera, and reads as
+        // "the player just fired the right-click weapon down their aim line".
+        float beam_fade = clamp(rmb_beam_params.x, 0.0, 1.0);
+        if (beam_fade > 0.001 && length(rmb_beam_origin_dir.zw) > 0.001) {
+            vec2  beam_origin    = rmb_beam_origin_dir.xy;
+            vec2  beam_dir       = normalize(rmb_beam_origin_dir.zw);
+            vec2  beam_perp      = vec2(-beam_dir.y, beam_dir.x);
+            float beam_length    = rmb_beam_params.y;
+            float beam_half_w    = rmb_beam_params.z;
+
+            // Project the fragment's world position onto the beam axis. `t` is distance along
+            // the beam from origin; `s` is signed offset perpendicular to the axis.
+            vec2  rel_w          = world_uv - beam_origin;
+            float t              = dot(rel_w, beam_dir);
+            float s              = dot(rel_w, beam_perp);
+
+            if (t > -0.05 && t < beam_length + 0.05) {
+                // Capsule SDF along the beam axis (rounded ends).
+                float clamped_t = clamp(t, 0.0, beam_length);
+                vec2  closest   = beam_origin + beam_dir * clamped_t;
+                float d_capsule = length(world_uv - closest);
+
+                // Bright core + soft outer glow, both fading with `beam_fade` (1=just-fired, 0=ended).
+                float core_t  = smoothstep(beam_half_w * 0.55, 0.0, d_capsule);
+                float glow_t  = smoothstep(beam_half_w * 2.5, 0.0, d_capsule);
+                float energy  = pow(beam_fade, 0.5);
+
+                // Forward-fade so the beam reads as travelling outward: stronger near the tip
+                // early, retreats back toward the player as it dies.
+                float front   = clamp(t / beam_length, 0.0, 1.0);
+                float head    = smoothstep(beam_fade - 0.15, beam_fade + 0.05, 1.0 - front);
+                float tail_atten = mix(1.0, head, 0.6);
+
+                vec3  core_col = vec3(1.0, 0.85, 1.0);
+                vec3  glow_col = vec3(0.85, 0.40, 1.0);
+                final_color = mix(final_color, glow_col, glow_t * energy * 0.55 * tail_atten);
+                final_color = mix(final_color, core_col, core_t * energy * tail_atten);
+
+                // Screen-space warp: pinch the background slightly toward the beam axis,
+                // animated with a moving ripple along its length. Cheap re-sample-free version:
+                // we just recolour with a noise-jittered shift in `final_color`.
+                float warp_band = exp(-(s * s) / (beam_half_w * beam_half_w * 9.0));
+                float ripple    = sin(t * 14.0 - tick * 18.0) * 0.5 + 0.5;
+                float warp_amt  = warp_band * energy * 0.18 * (0.6 + 0.4 * ripple);
+                final_color += glow_col * warp_amt;
+            }
+        }
 
         // --- Wave Button (interactable at world origin) ---
         // wave_button_state: x=next_idx, y=remaining_to_press, z=in_range, w=press_flash
@@ -272,14 +323,14 @@ layout(binding=1) uniform Player_Fs_Params {
     float player_max_hp_uniform;
     float player_invulnerable_timer_uniform;
     float player_invulnerability_duration_uniform;
-    vec2 dash_trail_positions;
-    float dash_trail_count_uniform;
-    float is_dashing_uniform;
     vec2 player_aim_dir;            // unit vector from player toward mouse (world space)
     float lmb_fire_flash;            // 0..1, set to 1 on LMB fire and decayed each frame
     float rmb_fire_flash;            // 0..1, set to 1 on RMB fire and decayed each frame
     float rmb_charge_ratio;          // current rmb_charge / RMB_BEAM_THRESHOLD; 0..1 = filling, >=1 = beam-ready, can exceed for overcharge
     float rmb_max_charge_ratio;      // soft cap (eff_rmb_max_charge / RMB_BEAM_THRESHOLD), used to scale the ring's "overcharge" portion
+    float dash_flash;                // 0..1; 1 at dash start, decays over PLAYER_DASH_FLASH_DURATION. Drives stretch + cyan tint + glow.
+    vec2  dash_direction;            // unit vector along the dash launch axis (stable post-dash)
+    float echo_alpha;                // 1.0 for the live player draw; <1.0 for afterimage echoes (multiplies final alpha + tints cyan)
 };
 in vec2 v_uv;
 out vec4 frag_color;
@@ -289,9 +340,27 @@ mat2 rotate2d(float angle) { float c=cos(angle); float s=sin(angle); return mat2
 
 void main() {
     vec2 p_orig = v_uv - vec2(0.5);
-    float anim_time = tick * 0.05; 
+    // --- Dash stretch ---
+    // While dashing (or during the post-dash flash decay) we squash the player's local space
+    // perpendicular to the dash axis and stretch it along the dash axis, so the ship reads as
+    // a smear of motion. We do this BEFORE every other SDF computation so all the rings, blade,
+    // glow, etc. inherit the deformation. The transform uses the inverse of the visual stretch
+    // so that "outside" the deformed ship the body actually grows in screen-space.
+    if (dash_flash > 0.001 && length(dash_direction) > 0.01) {
+        vec2  axis    = normalize(dash_direction);
+        vec2  perp    = vec2(-axis.y, axis.x);
+        float along   = dot(p_orig, axis);
+        float across  = dot(p_orig, perp);
+        float stretch = 1.0 + dash_flash * 0.55;     // along-axis grows
+        float squash  = 1.0 - dash_flash * 0.20;     // perp-axis shrinks
+        // We're inverse-mapping the fragment's local position back to the un-deformed ship.
+        along  /= stretch;
+        across /= max(squash, 0.05);
+        p_orig = axis * along + perp * across;
+    }
+    float anim_time = tick * 0.05;
     float color_time = tick * 0.5;
-    float direct_tick = tick; 
+    float direct_tick = tick;
 
     float hp = player_hp_uniform;
     float max_hp = player_max_hp_uniform;
@@ -488,6 +557,24 @@ void main() {
         suck_alpha   = (ring_a + ring_b * 0.6) * rmb_fire_flash;
     }
 
+    // --- Dash glow ---
+    // A bright cyan/white energy halo behind the ship along the dash axis. Strongest right at
+    // launch, fades with `dash_flash`. Sits inside the player quad (small footprint) — the
+    // afterimage echoes drawn in earlier passes provide the long streak.
+    float dash_alpha = 0.0;
+    vec3  dash_color = vec3(0.55, 0.95, 1.0);
+    if (dash_flash > 0.001 && hp > 0.01 && length(dash_direction) > 0.01) {
+        vec2  axis_d  = normalize(dash_direction);
+        vec2  perp_d  = vec2(-axis_d.y, axis_d.x);
+        float along_d = dot(p_orig, axis_d);
+        float across_d = dot(p_orig, perp_d);
+        // Capsule-ish glow that extends from just behind the ship toward the launch direction.
+        // Negative `along_d` is "behind" the player relative to dash forward.
+        float glow_band  = exp(-(across_d * across_d) / 0.012);
+        float along_falloff = smoothstep(0.30, -0.10, along_d); // bright behind, dim in front
+        dash_alpha = glow_band * along_falloff * dash_flash * 0.85;
+    }
+
     // --- Combine Colors Additively & Determine Final Alpha ---
     vec3 combined_color = vec3(0.0);
     combined_color += player_glow_color * glow_shape_alpha; // Health-based glow first (behind other elements)
@@ -499,11 +586,24 @@ void main() {
     combined_color += blade_color * shaft_alpha;
     combined_color += vec3(0.85, 0.5, 1.0) * suck_alpha * 1.8;
     combined_color += charge_color * charge_alpha * 1.2;
+    combined_color += dash_color * dash_alpha * 1.5;
 
     float final_alpha = max(max(max(core_alpha, ring1_alpha), max(ring2_alpha, glow_alpha_contrib)), glow_shape_alpha);
     final_alpha = max(final_alpha, max(blade_alpha, shaft_alpha));
     final_alpha = max(final_alpha, suck_alpha);
     final_alpha = max(final_alpha, charge_alpha);
+    final_alpha = max(final_alpha, dash_alpha);
+
+    // --- Afterimage echo modulation ---
+    // The renderer draws the player multiple times per frame during a dash: the live draw
+    // passes echo_alpha=1.0; ghost echoes pass echo_alpha<1.0 with a position translated to a
+    // stored trail point. For ghosts we dim everything and shift colour toward cyan so the
+    // streak reads as "motion blur" rather than a stack of solid ships.
+    if (echo_alpha < 0.999) {
+        float ghost = clamp(echo_alpha, 0.0, 1.0);
+        combined_color = mix(combined_color, dash_color * 0.9, 0.55) * ghost;
+        final_alpha *= ghost;
+    }
 
     // --- Apply Flash Overlay (if invulnerable and alive) ---
     if (invul_timer > 0.001 && invul_duration > 0.001 && hp > 0.01) {
@@ -667,7 +767,10 @@ void main() {
     vec3 body_base_rgb = mix(body_swirl_color, color_core_black, core_influence);
 
     // --- Glow and Tail Calculation ---
-    vec3 glow_color = vec3(1.0, 0.7, 1.0) * 5.8; // Very bright, slightly pinkish-purple glow, boosted
+    // The 5.8x boost was meant for HDR + bloom; with the current LDR target it saturates every
+    // channel so the bullet read as a flat white oval. Tone the glow down to LDR-safe values so
+    // the purple swirl underneath actually shows through.
+    vec3 glow_color = vec3(0.95, 0.55, 1.0) * 1.1;
 
     // Glow shape: wider and significantly longer than the body, especially at the tail
     float glow_uv_half_width = body_uv_half_width * 1.8; // Glow is wider
@@ -757,9 +860,6 @@ in float v_enemy_main_rotation_fs; // Boss aiming angle
 out vec4 frag_color;
 
 const float PI = 3.14159265359;
-// Constants for BOSS_CHROME_ORB enemy type, could be uniforms if they need to vary
-// These are in world units. We'll convert them to scaled_uv space.
-const float ENEMY_BOSS_CHROME_ORB_WORLD_SCALE = 0.5; // From Odin PLAYER_SCALE * 2.5 approx
 
 mat2 rotate2d(float angle) {
     float s = sin(angle);
@@ -812,20 +912,22 @@ void main() {
         if (laser_count > 6) laser_count = 6;
 
         // Decode the 6-element slot permutation packed as base-6 in color.g (max 46655).
+        // Use uints to avoid HLSL5 X3556 ("integer divides may be much slower") on this
+        // fixed-arity decoder.
         int slot_order[6];
         {
-            int e = int(enemy_color_out_fs.g + 0.5);
-            slot_order[0] = e - (e / 6) * 6; e = e / 6;
-            slot_order[1] = e - (e / 6) * 6; e = e / 6;
-            slot_order[2] = e - (e / 6) * 6; e = e / 6;
-            slot_order[3] = e - (e / 6) * 6; e = e / 6;
-            slot_order[4] = e - (e / 6) * 6; e = e / 6;
-            slot_order[5] = e - (e / 6) * 6;
+            uint e = uint(enemy_color_out_fs.g + 0.5);
+            slot_order[0] = int(e % 6u); e /= 6u;
+            slot_order[1] = int(e % 6u); e /= 6u;
+            slot_order[2] = int(e % 6u); e /= 6u;
+            slot_order[3] = int(e % 6u); e /= 6u;
+            slot_order[4] = int(e % 6u); e /= 6u;
+            slot_order[5] = int(e % 6u);
         }
 
         // World-unit constants for the orb body and the laser beam.
         const float ORB_RADIUS_W   = 0.18;  // matches ENEMY_BOSS_VISUAL_RADIUS
-        const float LASER_WIDTH_W  = 0.10;  // matches BOSS_LASER_WIDTH
+        const float LASER_WIDTH_W  = 0.07;  // matches BOSS_LASER_WIDTH
         const float TWO_PI         = 6.28318530718;
         const float SLOT_STEP      = TWO_PI / 6.0;
 

@@ -9,6 +9,7 @@ import "base:runtime"
 import shared "../../shared"
 import particle "../particle"
 import projectile "../projectile"
+import collision "../collision"
 
 
 update_player :: proc(dt: f32) {
@@ -18,6 +19,18 @@ update_player :: proc(dt: f32) {
             shared.state.is_dashing = false
         }
 
+        // dash_flash decays toward zero independently of is_dashing so the visual lingers a
+        // beat after the actual dash ends — afterimages get to fade in place.
+        if shared.state.dash_flash > 0.0 {
+            shared.state.dash_flash = math.max(0.0,
+                shared.state.dash_flash - dt / shared.PLAYER_DASH_FLASH_DURATION)
+            // When the flash is fully gone, dispose of the stored trail too. Until then, leave
+            // it intact so the renderer can keep drawing fading echoes.
+            if shared.state.dash_flash <= 0.0 {
+                shared.state.player_dash_trail_count = 0
+            }
+        }
+
         if shared.state.key_shift_down && !shared.state.is_dashing && shared.state.dash_cooldown_timer <= 0.0 {
             shared.state.is_dashing = true
             shared.state.dash_timer = shared.PLAYER_DASH_DURATION
@@ -25,6 +38,7 @@ update_player :: proc(dt: f32) {
             shared.state.player_invulnerable_timer = math.max(shared.state.player_invulnerable_timer, shared.PLAYER_DASH_DURATION)
             shared.state.player_dash_trail_count = 0
             shared.state.dash_trail_spawn_timer = 0.0
+            shared.state.dash_flash = 1.0
             fmt.printf("Player DASH!\n")
         }
 
@@ -44,7 +58,7 @@ update_player :: proc(dt: f32) {
         if shared.state.is_dashing {
             if shared.state.dash_timer <= 0.0 {
                 shared.state.is_dashing = false
-                shared.state.player_dash_trail_count = 0
+                // Don't clear the trail here — let dash_flash's decay finish the afterimage anim.
             } else {
                 shared.state.dash_trail_spawn_timer -= dt
                 if shared.state.dash_trail_spawn_timer <= 0.0 {
@@ -65,6 +79,9 @@ update_player :: proc(dt: f32) {
                 dash_direction = {0, 1}
             }
             shared.state.player_vel = dash_direction * shared.state.eff_player_max_speed * shared.PLAYER_DASH_SPEED_MULT
+            // Cache the dash axis so the post-dash stretch/echo visuals stay aligned to the
+            // launch vector even after player_vel rotates back to whatever WASD is held now.
+            shared.state.dash_direction = dash_direction
         } else {
             final_accel_f := accel_input_f * shared.PLAYER_ACCELERATION
             if shared.state.key_s_down && !shared.state.key_w_down && accel_input_f.y < -0.5 { final_accel_f *= shared.PLAYER_REVERSE_FACTOR }
@@ -80,17 +97,31 @@ update_player :: proc(dt: f32) {
 
         shared.state.player_pos += shared.state.player_vel * dt
 
+        // Tick the beam visual; the timer is set on full-charge fire below.
+        if shared.state.rmb_beam_timer > 0.0 {
+            shared.state.rmb_beam_timer = math.max(0.0, shared.state.rmb_beam_timer - dt)
+        }
+
         rmb_pressed_this_frame_f := shared.state.rmb_down && !shared.state.previous_rmb_down
         if rmb_pressed_this_frame_f && shared.state.rmb_charge >= shared.RMB_MIN_FIRE_CHARGE {
             charge := shared.state.rmb_charge
             // Droplet swirl scaled to charge fraction. At 200% you get 2× the droplets.
             particle.spawn_swirling_charge_scaled(charge)
-            // Beam/pulse only at fully-charged or overcharged release.
+            // Beam + pulse only at fully-charged or overcharged release. The beam is the
+            // headline directional weapon; the pulse remains the omnidirectional flash so
+            // enemies behind the player still get hit.
             if charge >= shared.RMB_BEAM_THRESHOLD {
                 particle.spawn_rmb_pulse(charge)
+                aim := shared.state.player_aim_dir
+                if m.len_sq_vec2(aim) < 0.0001 { aim = {0, 1} }
+                shared.state.rmb_beam_origin = shared.state.player_pos
+                shared.state.rmb_beam_dir    = m.norm_vec2(aim)
+                shared.state.rmb_beam_total  = shared.RMB_BEAM_DURATION
+                shared.state.rmb_beam_timer  = shared.RMB_BEAM_DURATION
+                collision.apply_rmb_beam_damage(shared.state.rmb_beam_origin, shared.state.rmb_beam_dir)
             }
             shared.state.rmb_fire_flash = 1.0
-            fmt.printf("RMB Fired at %.0f%% charge%s\n", charge * 100.0, charge >= shared.RMB_BEAM_THRESHOLD ? " (PULSE)" : "")
+            fmt.printf("RMB Fired at %.0f%% charge%s\n", charge * 100.0, charge >= shared.RMB_BEAM_THRESHOLD ? " (BEAM)" : "")
             shared.state.rmb_charge = 0.0
         }
         shared.state.previous_rmb_down = shared.state.rmb_down
